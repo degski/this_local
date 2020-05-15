@@ -9,7 +9,7 @@ The `this_local`-library is header-only and requires `C++17` with external depen
 ## tl;dr
 
 
-The library is called `this_local` in opposition to `thread_local`, it is mostly a PoC and as such a thing in progress. It provides a facility to easily add **instance-thread_local storage** to a class. This library is only useful in a context of multithreading.
+The library has been named `this_local` in opposition to `thread_local`, it is both a PoC and and a WIP. It provides a facility to easily add **instance-thread_local storage** to a class. This library is only useful in a context of multithreading.
 
 The main and only class has the following signature:
 
@@ -53,7 +53,8 @@ The instrumented vector looks like this:
         std::mutex vector_mutex;
         std::vector<ValueType> vector;
 
-        ~this_concurrent_vector ( ) { this_local_storage.destroy ( this ); } // call the instance-destructor
+        ~this_concurrent_vector ( ) { this_local_storage.destroy ( this ); } // call the instance-destructor with
+                                                                             // the `this`-pointer as argument.
 
         void push_back ( ValueType const & v_ ) {
 
@@ -83,9 +84,9 @@ We add `this_local` as a static member to our class. In de the destructor of the
 
         ...
 
-        vec_.push_back ( this_thread_id ); // do something concurrently (f.e. push_back ())
+        vec_.push_back ( some Type-argument to push ); // do something concurrently (f.e. push_back ( something ))
 
-        vec_.this_local_storage.destroy ( this_thread_id ); // call the this_local-thread-destructor
+        vec_.this_local_storage.destroy ( std::this_thread::get_id ( ) ); // call the this_local-thread-destructor
 
         return { this_thread_id, sleep_duration, ctr++ };
     }
