@@ -96,4 +96,4 @@ That's all.
 
 Storage is created on demand, there can be concurrently instances of the same class that have no storage allocated whatsover, together with those who do.  Over the object's life-time, storage can be (per object) created-destructed and recreated later. On default construction, no memory allocation takes place.
 
-There is no absolute need to call the thread-destructor (depending on your use pattern), eventually all the storage will be torn down by the instance of Type (in its destructor), also the storage of the threads that already ceased to exist, the cleanest is of coarse to call the `this_local`-thread-destructor.
+There is no absolute need to call the thread-destructor (depending on your use pattern), eventually all the created storage will be torn down (destructed) by the instance of Type (in its destructor), also the storage of the threads that already ceased to exist, the cleanest is of coarse to call the `this_local`-thread-destructor.
