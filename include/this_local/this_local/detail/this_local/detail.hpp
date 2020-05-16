@@ -211,12 +211,12 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
 
     struct lf_node {
 
-        std::shared_ptr<value_type> data;
-        std::atomic<long long> internal_count;
-
+        std::atomic<long long> internal_count = 0;
         counted_lf_node_ptr prev;
+        value_type data;
 
-        lf_node ( value_type const & data_ ) : data ( std::make_shared<value_type> ( data_ ) ), internal_count ( 0 ) {}
+        template<typename... Args>
+        lf_node ( Args &&... args_ ) : data{ std::forward<Args> ( args_ )... } {}
     };
 
     using lf_nodes = plf::colony<lf_node, typename Allocator::template rebind<lf_node>::other>;
@@ -239,10 +239,9 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     }
 
     iterator insert_implementation ( iterator && it_ ) noexcept {
-        counted_lf_node_ptr node;
-        node.ptr            = &*it_;
-        node.external_count = 1;
-        node.ptr->prev      = tail.load ( std::memory_order_relaxed );
+        counted_lf_node_ptr node = { 1, &*it_ };
+        node.ptr->data           = it_->data;
+        node.ptr->prev           = tail.load ( std::memory_order_relaxed );
         while ( not tail.compare_exchange_weak ( node.ptr->prev, node, std::memory_order_release, std::memory_order_relaxed ) )
             yield ( );
         return std::forward<iterator> ( it_ );
@@ -254,23 +253,23 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         return insert_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
-    [[maybe_unused]] iterator emplace ( Args &&... args_ ) noexcept {
+    [[maybe_unused]] iterator emplace ( Args &&... args_ ) {
         return insert_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
-    [[nodiscard]] std::shared_ptr<value_type> pop ( ) noexcept {
+    [[nodiscard]] pointer pop ( ) noexcept {
         counted_lf_node_ptr old_tail = tail.load ( std::memory_order_relaxed );
         for ( ever ) {
             increase_tail_count ( old_tail );
             lf_node * const ptr = old_tail.ptr;
             if ( not ptr )
-                return std::shared_ptr<value_type> ( );
+                return nullptr;
             if ( tail.compare_exchange_strong ( old_tail, ptr->prev, std::memory_order_relaxed ) ) {
-                std::shared_ptr<value_type> res;
-                res.swap ( ptr->data );
+                pointer res;
+                std::swap ( res, ptr->data );
                 int const count_increase = old_tail.external_count - 2;
                 if ( ptr->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
-                    nodes.erase ( get_iterator_from_pointer ( ptr ) ); // expensive (20%), but something has to give.
+                    nodes.erase ( get_iterator_from_pointer ( ptr ) );
                 return res;
             }
             else if ( ptr->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 ) {
@@ -286,7 +285,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     [[nodiscard]] const_iterator end ( ) const noexcept { return nodes.end ( ); }
     [[nodiscard]] const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
     [[nodiscard]] iterator end ( ) noexcept { return nodes.end ( ); }
-};
+}; // namespace sax
 
 #undef ever
 
