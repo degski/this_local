@@ -223,6 +223,10 @@ C:\Program Files\LLVM\lib\clang\10.0.0\lib\windows\clang_rt.asan-preinit-x86_64.
   <ItemGroup>
     <ClInclude Include="include\this_local\this_local.hpp" />
     <ClInclude Include="include\this_local\this_local\detail\this_local\detail.hpp" />
+    <ClInclude Include="include\this_local\this_local\hedley.h" />
+    <ClInclude Include="include\this_local\this_local\plf_colony.h" />
+    <ClInclude Include="include\this_local\this_local\plf_list.h" />
+    <ClInclude Include="include\this_local\this_local\plf_stack.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />

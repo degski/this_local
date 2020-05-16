@@ -38,6 +38,7 @@
 #include <mutex>
 #include <new>
 #include <random>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -142,21 +143,43 @@ template<typename ValueType, typename ThisLocalType>
 typename this_concurrent_vector<ValueType, ThisLocalType>::this_local_type
     this_concurrent_vector<ValueType, ThisLocalType>::this_local_storage;
 
-template<typename ValueType, typename ThisLocalType>
-std::tuple<std::thread::id, int, int> work ( this_concurrent_vector<ValueType, ThisLocalType> & vec_ ) {
-    static std::atomic<int> ctr = 0;
-    int sleep_duration          = sax::uniform_int_distribution<int> ( 1, 20 ) ( rng );
-    //    std::this_thread::sleep_for ( std::chrono::microseconds ( sleep_duration ) );
-    std::thread::id this_thread_id = std::this_thread::get_id ( );
+template<typename Type>
+std::tuple<std::thread::id, int> work ( Type & vec_ ) {
 
-    vec_.push_back ( this_thread_id ); // do something concurrently (f.e. push_back ())
+    static int ctr = 0;
 
-    vec_.this_local_storage.destroy ( this_thread_id ); // call the thread-destructor
+    std::this_thread::sleep_for ( std::chrono::microseconds ( sax::uniform_int_distribution<int> ( 1, 20 ) ( rng ) ) );
 
-    return { this_thread_id, sleep_duration, ctr++ };
+    vec_.emplace ( 1 ); // do something concurrently (f.e. push_back ())
+                        // vec_.this_local_storage.destroy ( std::this_thread::get_id ( ) ); // call the thread-destructor
+
+    return { std::this_thread::get_id ( ), ctr++ };
 }
 
-int main ( ) {
+template<typename value_type>
+struct ring {
+
+    struct node {
+        node * prev = nullptr;
+        value_type data;
+    };
+
+    template<typename... Args>
+    auto emplace ( Args &&... args_ ) {
+
+        // std::scoped_lock lock ( )
+        auto it = nodes.emplace ( std::forward<Args> ( args_ )... );
+        pointers.emplace_back ( &*it );
+        return it;
+    }
+
+    plf::colony<node> nodes;
+    plf::list<node *> pointers;
+};
+
+/*
+
+int main5686780 ( ) {
 
     this_concurrent_vector<std::thread::id, int> ids;
 
@@ -165,7 +188,7 @@ int main ( ) {
     timer.start ( );
 
     for ( int n = 0; n < 32; ++n )
-        std::jthread{ work<std::thread::id, int>, std::ref ( ids ) };
+        std::jthread{ work<this_concurrent_vector<std::thread::id, int>>, std::ref ( ids ) };
 
     duration = static_cast<std::uint64_t> ( timer.get_elapsed_ms ( ) );
     std::cout << nl << duration << "ms" << nl;
@@ -173,6 +196,31 @@ int main ( ) {
     for ( auto id : ids.vector )
         std::cout << id << sp;
     std::cout << nl;
+
+    return EXIT_SUCCESS;
+}
+
+*/
+
+int main ( ) {
+
+    sax::lock_free_plf_stack<int> stk;
+
+    std::uint64_t duration;
+    plf::nanotimer timer;
+    timer.start ( );
+
+    for ( int n = 0; n < 128; ++n )
+        std::jthread{ work<sax::lock_free_plf_stack<int>>, std::ref ( stk ) };
+
+    duration = static_cast<std::uint64_t> ( timer.get_elapsed_ms ( ) );
+    std::cout << nl << duration << "ms" << nl;
+
+    std::set<void *> p;
+    for ( auto & node : stk )
+        p.emplace ( ( void * ) std::addressof ( node ) );
+
+    std::cout << p.size ( ) << nl;
 
     return EXIT_SUCCESS;
 }

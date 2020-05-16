@@ -47,6 +47,8 @@
 #        undef WIN32_LEAN_AND_MEAN
 #    endif
 
+#    define _SILENCE_CXX17_OLD_ALLOCATOR_MEMBERS_DEPRECATION_WARNING
+
 #else
 
 #    include <emmintrin.h>
@@ -68,7 +70,10 @@
 #include <utility>
 
 #include "../../../this_local/hedley.h"
-#include "../../../this_local/plf_list.h"
+
+#include "../../../this_local/plf_colony.h"
+#include "../../../this_local/plf_list.h"  // a queue
+#include "../../../this_local/plf_stack.h" // a vector
 
 namespace sax {
 
@@ -182,5 +187,111 @@ struct slim_rw_lock final {
     private:
     SRWLOCK handle = SRWLOCK_INIT;
 };
+
+#define ever                                                                                                                       \
+    ;                                                                                                                              \
+    ;
+
+template<typename T, typename Allocator = std::allocator<T>>
+class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed., Listing 7.13 - Anthony Wlliams
+
+    using value_type      = T;
+    using pointer         = T *;
+    using reference       = T &;
+    using const_pointer   = T const *;
+    using const_reference = T const &;
+
+    struct lf_node;
+
+    struct counted_lf_node_ptr {
+
+        long long external_count;
+        lf_node * ptr;
+    };
+
+    struct lf_node {
+
+        std::shared_ptr<value_type> data;
+        std::atomic<long long> internal_count;
+
+        counted_lf_node_ptr prev;
+
+        lf_node ( value_type const & data_ ) : data ( std::make_shared<value_type> ( data_ ) ), internal_count ( 0 ) {}
+    };
+
+    using lf_nodes = plf::colony<lf_node, typename Allocator::template rebind<lf_node>::other>;
+
+    using size_type      = typename lf_nodes::size_type;
+    using iterator       = typename lf_nodes::iterator;
+    using const_iterator = typename lf_nodes::const_iterator;
+
+    lf_nodes nodes;
+    std::atomic<counted_lf_node_ptr> tail;
+
+    void increase_tail_count ( counted_lf_node_ptr & old_counter_ ) noexcept {
+        counted_lf_node_ptr new_counter;
+        do {
+            new_counter = old_counter_;
+            new_counter.external_count += 1;
+        } while (
+            not tail.compare_exchange_strong ( old_counter_, new_counter, std::memory_order_acquire, std::memory_order_relaxed ) );
+        old_counter_.external_count = new_counter.external_count;
+    }
+
+    iterator insert_implementation ( iterator && it_ ) noexcept {
+        counted_lf_node_ptr node;
+        node.ptr            = &*it_;
+        node.external_count = 1;
+        node.ptr->prev      = tail.load ( std::memory_order_relaxed );
+        while ( not tail.compare_exchange_weak ( node.ptr->prev, node, std::memory_order_release, std::memory_order_relaxed ) )
+            yield ( );
+        return std::forward<iterator> ( it_ );
+    }
+
+    public:
+    [[maybe_unused]] iterator push ( value_type const & data_ ) { return insert_implementation ( nodes.emplace ( data_ ) ); }
+    [[maybe_unused]] iterator push ( value_type && data_ ) {
+        return insert_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+    }
+    template<typename... Args>
+    [[maybe_unused]] iterator emplace ( Args &&... args_ ) noexcept {
+        return insert_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+    }
+
+    [[nodiscard]] std::shared_ptr<value_type> pop ( ) noexcept {
+        counted_lf_node_ptr old_tail = tail.load ( std::memory_order_relaxed );
+        for ( ever ) {
+            increase_tail_count ( old_tail );
+            lf_node * const ptr = old_tail.ptr;
+            if ( not ptr )
+                return std::shared_ptr<value_type> ( );
+            if ( tail.compare_exchange_strong ( old_tail, ptr->prev, std::memory_order_relaxed ) ) {
+                std::shared_ptr<value_type> res;
+                res.swap ( ptr->data );
+                int const count_increase = old_tail.external_count - 2;
+                if ( ptr->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
+                    nodes.erase ( get_iterator_from_pointer ( ptr ) ); // expensive (20%), but something has to give.
+                return res;
+            }
+            else if ( ptr->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 ) {
+                ptr->internal_count.load ( std::memory_order_acquire );
+                nodes.erase ( get_iterator_from_pointer ( ptr ) );
+            }
+        }
+    }
+
+    [[nodiscard]] const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
+    [[nodiscard]] const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
+    [[nodiscard]] iterator begin ( ) noexcept { return nodes.begin ( ); }
+    [[nodiscard]] const_iterator end ( ) const noexcept { return nodes.end ( ); }
+    [[nodiscard]] const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
+    [[nodiscard]] iterator end ( ) noexcept { return nodes.end ( ); }
+};
+
+#undef ever
+
+#if defined( _MSC_VER )
+#    undef _SILENCE_CXX17_OLD_ALLOCATOR_MEMBERS_DEPRECATION_WARNING
+#endif
 
 } // namespace sax

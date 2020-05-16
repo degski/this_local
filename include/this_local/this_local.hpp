@@ -52,18 +52,18 @@ class this_local {
 
         using void_pointer_type = void *;
 
-        std::uint32_t const val;
+        std::uint32_t const _;
 
         public:
         this_id ( void_pointer_type && pointer_ ) noexcept :
-            val{ ( std::uint32_t ) ( ( ( std::uintptr_t ) std::forward<void_pointer_type> ( pointer_ ) >> 32 ) ^
-                                     ( ( std::uintptr_t ) pointer_ ) ) } {}
+            _{ ( std::uint32_t ) ( ( ( std::uintptr_t ) std::forward<void_pointer_type> ( pointer_ ) >> 32 ) ^
+                                   ( ( std::uintptr_t ) pointer_ ) ) } {}
 
-        [[nodiscard]] bool operator== ( this_id const & r_ ) const noexcept { return val == r_.val; }
+        [[nodiscard]] bool operator== ( this_id const & r_ ) const noexcept { return _ == r_._; }
 
         template<typename Stream>
         [[maybe_unused]] friend Stream & operator<< ( Stream & out_, this_id const & id_ ) noexcept {
-            out_ << id_.val;
+            out_ << id_._;
             return out_;
         }
     };
@@ -98,14 +98,14 @@ class this_local {
         [[nodiscard]] bool operator== ( node const & r_ ) const noexcept { return id == r_.id; }
     };
 
-    template<typename MessageType>
+    // template<typename MessageType>
     class alignas ( 16 ) message {
 
         friend class this_local;
 
         key const sender;
         key const receiver;
-        MessageType contents;
+        char contents;
 
         // re-purpose input-output-operators
         // if ( message << sender ) // if message was sent by sender.
@@ -127,8 +127,8 @@ class this_local {
     template<typename... Args>
     [[nodiscard]] ValueType & get_implementation ( type_pointer_type && self_, Args &&... args_ );
 
-    mutable spin_rw_lock<int> rw_mutex;
     plf::list<node, Allocator<node>> nodes;
+    mutable spin_rw_lock<int> rw_mutex;
 
     public:
     using type           = Type;
