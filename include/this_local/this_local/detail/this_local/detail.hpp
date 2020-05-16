@@ -198,8 +198,10 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     using value_type      = T;
     using pointer         = T *;
     using reference       = T &;
+    using iterator        = pointer;
     using const_pointer   = T const *;
     using const_reference = T const &;
+    using const_iterator  = const_pointer;
 
     struct lf_node;
 
@@ -221,9 +223,8 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
 
     using lf_nodes = plf::colony<lf_node, typename Allocator::template rebind<lf_node>::other>;
 
-    using size_type      = typename lf_nodes::size_type;
-    using iterator       = typename lf_nodes::iterator;
-    using const_iterator = typename lf_nodes::const_iterator;
+    using lf_nodes_iterator       = typename lf_nodes::iterator;
+    using lf_nodes_const_iterator = typename lf_nodes::const_iterator;
 
     lf_nodes nodes;
     std::atomic<counted_lf_node_ptr> tail;
@@ -238,53 +239,58 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         old_counter_.external_count = new_counter.external_count;
     }
 
-    iterator insert_implementation ( iterator && it_ ) noexcept {
+    lf_nodes_iterator insert_implementation ( lf_nodes_iterator && it_ ) noexcept {
         counted_lf_node_ptr node = { 1, &*it_ };
         node.ptr->data           = it_->data;
         node.ptr->prev           = tail.load ( std::memory_order_relaxed );
         while ( not tail.compare_exchange_weak ( node.ptr->prev, node, std::memory_order_release, std::memory_order_relaxed ) )
             yield ( );
-        return std::forward<iterator> ( it_ );
+        return std::forward<lf_nodes_iterator> ( it_ );
     }
 
     public:
-    [[maybe_unused]] iterator push ( value_type const & data_ ) { return insert_implementation ( nodes.emplace ( data_ ) ); }
-    [[maybe_unused]] iterator push ( value_type && data_ ) {
+    [[maybe_unused]] lf_nodes_iterator push ( value_type const & data_ ) {
+        return insert_implementation ( nodes.emplace ( data_ ) );
+    }
+    [[maybe_unused]] lf_nodes_iterator push ( value_type && data_ ) {
         return insert_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
-    [[maybe_unused]] iterator emplace ( Args &&... args_ ) {
+    [[maybe_unused]] lf_nodes_iterator emplace ( Args &&... args_ ) {
         return insert_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
-    [[nodiscard]] pointer pop ( ) noexcept {
+    void pop ( ) noexcept {
         counted_lf_node_ptr old_tail = tail.load ( std::memory_order_relaxed );
         for ( ever ) {
             increase_tail_count ( old_tail );
-            lf_node * const ptr = old_tail.ptr;
-            if ( not ptr )
-                return nullptr;
-            if ( tail.compare_exchange_strong ( old_tail, ptr->prev, std::memory_order_relaxed ) ) {
-                pointer res;
-                std::swap ( res, ptr->data );
-                int const count_increase = old_tail.external_count - 2;
-                if ( ptr->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
-                    nodes.erase ( get_iterator_from_pointer ( ptr ) );
-                return res;
+            if ( lf_node * const ptr = old_tail.ptr; ptr ) {
+                if ( tail.compare_exchange_strong ( old_tail, ptr->prev, std::memory_order_relaxed ) ) {
+                    int const count_increase = old_tail.external_count - 2;
+                    if ( ptr->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
+                        nodes.erase ( get_iterator_from_pointer ( ptr ) );
+                    return;
+                }
+                else {
+                    if ( ptr->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 ) {
+                        ptr->internal_count.load ( std::memory_order_acquire );
+                        nodes.erase ( get_iterator_from_pointer ( ptr ) );
+                    }
+                }
             }
-            else if ( ptr->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 ) {
-                ptr->internal_count.load ( std::memory_order_acquire );
-                nodes.erase ( get_iterator_from_pointer ( ptr ) );
+            else {
+                return;
             }
         }
     }
 
-    [[nodiscard]] const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
-    [[nodiscard]] const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
-    [[nodiscard]] iterator begin ( ) noexcept { return nodes.begin ( ); }
-    [[nodiscard]] const_iterator end ( ) const noexcept { return nodes.end ( ); }
-    [[nodiscard]] const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
-    [[nodiscard]] iterator end ( ) noexcept { return nodes.end ( ); }
+    [[nodiscard]] lf_nodes_const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
+    [[nodiscard]] lf_nodes_const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
+    [[nodiscard]] lf_nodes_iterator begin ( ) noexcept { return nodes.begin ( ); }
+    [[nodiscard]] lf_nodes_const_iterator end ( ) const noexcept { return nodes.end ( ); }
+    [[nodiscard]] lf_nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
+    [[nodiscard]] lf_nodes_iterator end ( ) noexcept { return nodes.end ( ); }
+
 }; // namespace sax
 
 #undef ever
