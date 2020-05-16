@@ -76,7 +76,7 @@ The instrumented vector looks like this:
         this_concurrent_vector<ValueType, ThisLocalType>::this_local_storage;
 
 
-We add `this_local` as a static member to our class. In de the destructor of the Type-class, the `this_local`-instance-destructor has to be called. In the thread function we call the `this_local`-thread-destructor before returning, like shown here in the function below:
+We add `this_local` as a static member to our class. In de the destructor of the Type-class, the `this_local`-instance-destructor has to be called. In thread function we call the `this_local`-thread-destructor before returning, like shown here in the function below:
 
 
     template<typename ValueType, typename ThisLocalType>
@@ -94,6 +94,6 @@ We add `this_local` as a static member to our class. In de the destructor of the
 
 That's all.
 
-Storage is created on demand, there can be concurrently instances of the same class that have no storage allocated whatsover, together with those who do.  Over the object's life-time, storage can be (per object) created-destructed and recreated later. On default construction, no memory allocation takes place.
+Storage is created on demand, there can be concurrently instances of the same class that have no storage allocated whatsoever, together with those who do.  Over the object's life-time, storage can be (per object) created-destructed and recreated later. On default construction, no memory allocation takes place.
 
 There is no absolute need to call the thread-destructor (depending on your use pattern), eventually all the created storage will be torn down (destructed) by the instance of Type (in its destructor), also the storage of the threads that already ceased to exist, the cleanest is of coarse to call the `this_local`-thread-destructor.
