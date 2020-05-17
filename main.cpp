@@ -216,9 +216,9 @@ int main ( ) {
     duration = static_cast<std::uint64_t> ( timer.get_elapsed_ms ( ) );
     std::cout << nl << duration << "ms" << nl;
 
-    std::set<void *> p;
-    for ( auto & node : stk )
-        p.emplace ( ( void * ) std::addressof ( node ) );
+    std::set<int> p;
+    for ( auto node : stk )
+        p.emplace ( node );
 
     std::cout << p.size ( ) << nl;
 
