@@ -183,13 +183,15 @@ int main5686780 ( ) {
 
 int main ( ) {
 
+    constexpr int N = 100;
+
     sax::lock_free_plf_stack<int> stk;
 
     std::uint64_t duration;
     plf::nanotimer timer;
     timer.start ( );
 
-    for ( int n = 0; n < 100; ++n )
+    for ( int n = 0; n < N; ++n )
         std::jthread{ work<sax::lock_free_plf_stack<int>>, std::ref ( stk ) };
 
     duration = static_cast<std::uint64_t> ( timer.get_elapsed_ms ( ) );
@@ -199,7 +201,7 @@ int main ( ) {
     for ( auto & node : stk )
         sum += node.data;
 
-    std::cout << std::boolalpha << ( 5'050 == sum ) << nl;
+    std::cout << std::boolalpha << ( ( ( N * ( N + 1 ) ) / 2 ) == sum ) << nl;
 
     return EXIT_SUCCESS;
 }
