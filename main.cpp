@@ -199,7 +199,7 @@ int main ( ) {
 
     duration = static_cast<std::uint64_t> ( timer.get_elapsed_ms ( ) );
 
-    int sum = std::accumulate ( stk.begin ( ), stk.end ( ), 0, [] ( auto & l, auto & r ) { return l + r.data; } );
+    int sum = std::accumulate ( stk.begin ( ), stk.end ( ), 0, [] ( auto & l, auto & r ) { return l + r; } );
 
     std::cout << std::boolalpha << ( ( ( N * ( N + 1 ) ) / 2 ) == sum ) << sp << std::dec << ( ( ( duration * 10 ) / N ) / 10.0 )
               << " ms/thread" << nl;

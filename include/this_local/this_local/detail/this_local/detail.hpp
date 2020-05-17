@@ -283,18 +283,42 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         }
     }
 
-    /*
+    class const_iterator {
+        friend class lock_free_plf_stack;
+
+        node const * p;
+
+        public:
+        using iterator_category = std::forward_iterator_tag;
+
+        const_iterator ( node const * p_ ) noexcept : p{ std::forward<node const *> ( p_ ) } {}
+        const_iterator ( const_iterator && it_ ) noexcept : p{ std::forward<node const *> ( it_.p ) } {}
+        const_iterator ( const_iterator const & it_ ) noexcept : p{ it_.p } {}
+        [[maybe_unused]] const_iterator & operator= ( const_iterator && r_ ) noexcept { p = std::forward<node const *> ( r_.p ); }
+        [[maybe_unused]] const_iterator & operator= ( const_iterator const & r_ ) noexcept { p = r_.p; }
+
+        ~const_iterator ( ) = default;
+
+        [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
+            p = p->prev.ptr;
+            return *this;
+        }
+        [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept { return p == r_.p; }
+        [[nodiscard]] bool operator!= ( const_iterator const & r_ ) const noexcept { return p != r_.p; }
+        [[nodiscard]] const_reference operator* ( ) const noexcept { return p->data; }
+        [[nodiscard]] const_pointer operator-> ( ) const noexcept { return &p->data; }
+    };
 
     class iterator {
         friend class lock_free_plf_stack;
 
         node * p;
 
-        iterator ( node * p_ ) noexcept : p{ std::forward<node *> ( p_ ) } {}
-
         public:
         using iterator_category = std::forward_iterator_tag;
 
+        iterator ( const_iterator it_ ) noexcept : p{ const_cast<node *> ( std::forward<node const *> ( it_.p ) ) } {}
+        iterator ( node * p_ ) noexcept : p{ std::forward<node *> ( p_ ) } {}
         iterator ( iterator && it_ ) noexcept : p{ std::forward<node *> ( it_.p ) } {}
         iterator ( iterator const & it_ ) noexcept : p{ it_.p } {}
         [[maybe_unused]] iterator & operator= ( iterator && r_ ) noexcept { p = std::forward<node *> ( r_.p ); }
@@ -312,44 +336,19 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         [[nodiscard]] pointer operator-> ( ) const noexcept { return &p->data; }
     };
 
-    class const_iterator {
-        friend class lock_free_plf_stack;
+    [[nodiscard]] const_iterator begin ( ) const noexcept {
+        const_iterator it = tail.load ( std::memory_order_relaxed ).ptr;
+        ++it;
+        return it;
+    }
+    [[nodiscard]] const_iterator end ( ) const noexcept { return tail.load ( std::memory_order_relaxed ).ptr; }
 
-        node const * p;
+    [[nodiscard]] const_iterator cbegin ( ) const noexcept { return begin ( ); }
+    [[nodiscard]] const_iterator cend ( ) const noexcept { return end ( ); }
+    [[nodiscard]] iterator begin ( ) noexcept { return iterator{ const_cast<lock_free_plf_stack const *> ( this )->begin ( ) }; }
+    [[nodiscard]] iterator end ( ) noexcept { return iterator{ const_cast<lock_free_plf_stack const *> ( this )->end ( ) }; }
 
-        const_iterator ( node const * p_ ) noexcept : p{ std::forward<node const *> ( p_ ) } {}
-
-        public:
-        using iterator_category = std::forward_iterator_tag;
-
-        const_iterator ( const_iterator && it_ ) noexcept : p{ std::forward<node *> ( it_.p ) } {}
-        const_iterator ( const_iterator const & it_ ) noexcept : p{ it_.p } {}
-        [[maybe_unused]] const_iterator & operator= ( const_iterator && r_ ) noexcept {
-            p = std::forward<node const *> ( r_.p );
-        }
-        [[maybe_unused]] const_iterator & operator= ( const_iterator const & r_ ) noexcept { p = r_.p; }
-
-        ~const_iterator ( ) = default;
-
-        [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
-            p = p->prev.ptr;
-            return *this;
-        }
-        [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept { return p == r_.p; }
-        [[nodiscard]] bool operator!= ( const_iterator const & r_ ) const noexcept { return p != r_.p; }
-        [[nodiscard]] const_reference operator* ( ) const noexcept { return p->data; }
-        [[nodiscard]] const_pointer operator-> ( ) const noexcept { return &p->data; }
-    };
-
-    [[nodiscard]] const_iterator begin ( ) const noexcept { return { tail.load ( std::memory_order_relaxed ).ptr }; }
-    [[nodiscard]] const_iterator cbegin ( ) const noexcept { return { tail.load ( std::memory_order_relaxed ).ptr }; }
-    [[nodiscard]] iterator begin ( ) noexcept { return { tail.load ( std::memory_order_relaxed ).ptr }; }
-
-    [[nodiscard]] const_iterator end ( ) const noexcept { return { tail.load ( std::memory_order_relaxed ).ptr }; }
-    [[nodiscard]] const_iterator cend ( ) const noexcept { return { tail.load ( std::memory_order_relaxed ).ptr }; }
-    [[nodiscard]] iterator end ( ) noexcept { return { tail.load ( std::memory_order_relaxed ).ptr }; }
-
-    */
+    /*
 
     [[nodiscard]] nodes_const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
     [[nodiscard]] nodes_const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
@@ -357,6 +356,8 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     [[nodiscard]] nodes_const_iterator end ( ) const noexcept { return nodes.end ( ); }
     [[nodiscard]] nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
     [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
+
+    */
 
 }; // namespace sax
 
