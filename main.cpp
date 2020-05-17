@@ -100,6 +100,12 @@ using sfc                                       = std::conditional_t<
 
 auto & rng = sfc::generator ( ); // always a reference, avoids checking for the tls-object's creation on every access.
 
+namespace test {
+void micro_sleep ( ) noexcept {
+    std::this_thread::sleep_for ( std::chrono::microseconds ( sax::uniform_int_distribution<int> ( 0, 16 ) ( rng ) ) );
+}
+} // namespace test
+
 template<typename ValueType>
 struct concurrent_vector {
 
@@ -145,12 +151,10 @@ typename this_concurrent_vector<ValueType, ThisLocalType>::this_local_type
 
 template<typename Type>
 std::tuple<std::thread::id, int> work ( Type & vec_ ) {
-
-    std::this_thread::sleep_for ( std::chrono::microseconds ( sax::uniform_int_distribution<int> ( 1, 20 ) ( rng ) ) );
-
-    vec_.emplace ( test::get_id ( ) ); // do something concurrently (f.e. push_back ())
+    test::micro_sleep ( );
+    vec_.emplace ( test::get_id ( ) );
+    test::micro_sleep ( );
     // vec_.this_local_storage.destroy ( std::this_thread::get_id ( ) ); // call the thread-destructor
-
     return { std::this_thread::get_id ( ), test::get_id ( ) };
 }
 
@@ -181,7 +185,7 @@ int main5686780 ( ) {
 
 int main ( ) {
 
-    constexpr int N = 100;
+    constexpr int N = 1'000;
 
     sax::lock_free_plf_stack<int> stk;
 
@@ -193,13 +197,13 @@ int main ( ) {
         std::jthread{ work<sax::lock_free_plf_stack<int>>, std::ref ( stk ) };
 
     duration = static_cast<std::uint64_t> ( timer.get_elapsed_ms ( ) );
-    std::cout << nl << duration << "ms" << nl;
 
     int sum = 0;
     for ( auto & node : stk )
         sum += node.data;
 
-    std::cout << std::boolalpha << ( ( ( N * ( N + 1 ) ) / 2 ) == sum ) << nl;
+    std::cout << std::boolalpha << ( ( ( N * ( N + 1 ) ) / 2 ) == sum ) << sp << std::dec << ( ( ( duration * 10 ) / N ) / 10.0 )
+              << " ms/thread" << nl;
 
     return EXIT_SUCCESS;
 }
