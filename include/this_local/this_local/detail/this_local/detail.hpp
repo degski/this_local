@@ -283,6 +283,8 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         }
     }
 
+    /*
+
     class const_iterator {
         friend class lock_free_plf_stack;
 
@@ -348,7 +350,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     [[nodiscard]] iterator begin ( ) noexcept { return iterator{ const_cast<lock_free_plf_stack const *> ( this )->begin ( ) }; }
     [[nodiscard]] iterator end ( ) noexcept { return iterator{ const_cast<lock_free_plf_stack const *> ( this )->end ( ) }; }
 
-    /*
+    */
 
     [[nodiscard]] nodes_const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
     [[nodiscard]] nodes_const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
@@ -356,10 +358,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     [[nodiscard]] nodes_const_iterator end ( ) const noexcept { return nodes.end ( ); }
     [[nodiscard]] nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
     [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
-
-    */
-
-}; // namespace sax
+};
 
 #undef ever
 
