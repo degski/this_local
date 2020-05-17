@@ -146,14 +146,12 @@ typename this_concurrent_vector<ValueType, ThisLocalType>::this_local_type
 template<typename Type>
 std::tuple<std::thread::id, int> work ( Type & vec_ ) {
 
-    static int ctr = 0;
-
     std::this_thread::sleep_for ( std::chrono::microseconds ( sax::uniform_int_distribution<int> ( 1, 20 ) ( rng ) ) );
 
     vec_.emplace ( test::get_id ( ) ); // do something concurrently (f.e. push_back ())
     // vec_.this_local_storage.destroy ( std::this_thread::get_id ( ) ); // call the thread-destructor
 
-    return { std::this_thread::get_id ( ), ctr++ };
+    return { std::this_thread::get_id ( ), test::get_id ( ) };
 }
 
 /*
