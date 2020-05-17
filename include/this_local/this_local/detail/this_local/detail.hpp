@@ -206,14 +206,14 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
 
     struct counted_lf_node_ptr {
 
-        long long external_count;
-        lf_node * ptr;
+        long long external_count = 0;
+        lf_node * ptr            = nullptr;
     };
 
     struct lf_node {
 
-        std::atomic<long long> internal_count = 0;
-        counted_lf_node_ptr prev;
+        std::atomic<long long> internal_count = { 0 };
+        counted_lf_node_ptr prev              = { 0, this };
         value_type data;
 
         template<typename... Args>
