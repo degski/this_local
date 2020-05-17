@@ -231,11 +231,13 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
 
     void increase_tail_count ( counted_node_ptr & old_counter_ ) noexcept {
         counted_node_ptr new_counter;
+
         do {
             new_counter = old_counter_;
             new_counter.external_count += 1;
         } while (
             not tail.compare_exchange_strong ( old_counter_, new_counter, std::memory_order_acquire, std::memory_order_relaxed ) );
+
         old_counter_.external_count = new_counter.external_count;
     }
 

@@ -63,7 +63,7 @@
 namespace thread {
 // Creates a new ID.
 [[nodiscard]] inline int get_id ( bool ) noexcept {
-    static std::atomic<int> global_id = 0;
+    static std::atomic<int> global_id = 1;
     return global_id++;
 }
 // Returns ID of this thread.
@@ -189,17 +189,17 @@ int main ( ) {
     plf::nanotimer timer;
     timer.start ( );
 
-    for ( int n = 0; n < 128; ++n )
+    for ( int n = 0; n < 100; ++n )
         std::jthread{ work<sax::lock_free_plf_stack<int>>, std::ref ( stk ) };
 
     duration = static_cast<std::uint64_t> ( timer.get_elapsed_ms ( ) );
     std::cout << nl << duration << "ms" << nl;
 
-    std::set<void *> p;
+    int sum = 0;
     for ( auto & node : stk )
-        p.emplace ( ( void * ) std::addressof ( node ) );
+        sum += node.data;
 
-    std::cout << p.size ( ) << nl;
+    std::cout << std::boolalpha << ( 5'050 == sum ) << nl;
 
     return EXIT_SUCCESS;
 }
