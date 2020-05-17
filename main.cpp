@@ -151,11 +151,11 @@ typename this_concurrent_vector<ValueType, ThisLocalType>::this_local_type
     this_concurrent_vector<ValueType, ThisLocalType>::this_local_storage;
 
 template<typename Type>
-std::tuple<std::thread::id, int> work ( Type & vec_ ) {
+std::tuple<std::thread::id, int> work ( Type & t_ ) {
     test::micro_sleep ( );
-    vec_.emplace ( test::get_id ( ) );
+    t_.emplace ( test::get_id ( ) );
     test::micro_sleep ( );
-    // vec_.this_local_storage.destroy ( std::this_thread::get_id ( ) ); // call the thread-destructor
+    // t_.this_local_storage.destroy ( std::this_thread::get_id ( ) ); // call the thread-destructor
     return { std::this_thread::get_id ( ), test::get_id ( ) };
 }
 
