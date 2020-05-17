@@ -48,6 +48,7 @@
 #    endif
 
 #    define _SILENCE_CXX17_OLD_ALLOCATOR_MEMBERS_DEPRECATION_WARNING
+#    define _ENABLE_EXTENDED_ALIGNED_STORAGE
 
 #else
 
@@ -72,8 +73,8 @@
 #include "../../../this_local/hedley.h"
 
 #include "../../../this_local/plf_colony.h"
-#include "../../../this_local/plf_list.h"  // a queue
-#include "../../../this_local/plf_stack.h" // a vector
+#include "../../../this_local/plf_list.h" // a queue
+#include "../../../this_local/plf_stack.h"
 
 namespace sax {
 
@@ -203,21 +204,35 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     using const_reference = T const &;
 
     struct node;
+    using node_ptr       = node *;
+    using const_node_ptr = node const *;
 
     struct counted_node_ptr {
 
         long long external_count = 0;
-        node * ptr               = nullptr;
+        node_ptr ptr;
     };
 
-    struct node {
+    struct alignas ( 16 ) node {
 
-        std::atomic<long long> internal_count = { 0 };
-        counted_node_ptr prev                 = { 0, this };
+        std::atomic<long long> internal_count;
+        counted_node_ptr next;
         value_type data;
 
         template<typename... Args>
-        node ( Args &&... args_ ) : data{ std::forward<Args> ( args_ )... } {}
+        node ( Args &&... args_ ) : internal_count{ 0 }, data{ std::forward<Args> ( args_ )... } {}
+
+        template<typename Stream>
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr n_ ) noexcept {
+            std::scoped_lock lock ( lock_free_plf_stack::output_mutex );
+            out_ << '<' << lock_free_plf_stack::abbreviate_pointer ( n_ ) << ' '
+                 << lock_free_plf_stack::abbreviate_pointer ( n_->next.ptr ) << '>';
+            return out_;
+        }
+        template<typename Stream>
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const & n_ ) noexcept {
+            return operator<< ( out_, &n_ );
+        }
     };
 
     private:
@@ -227,29 +242,33 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     using nodes_const_iterator = typename nodes_type::const_iterator;
 
     nodes_type nodes;
-    std::atomic<counted_node_ptr> tail;
+    std::atomic<counted_node_ptr> head;
 
-    void increase_tail_count ( counted_node_ptr & old_counter_ ) noexcept {
+    alignas ( 64 ) static spin_rw_lock<long long> output_mutex;
+
+    void increase_head_count ( counted_node_ptr & old_counter_ ) noexcept {
         counted_node_ptr new_counter;
 
         do {
             new_counter = old_counter_;
             new_counter.external_count += 1;
         } while (
-            not tail.compare_exchange_strong ( old_counter_, new_counter, std::memory_order_acquire, std::memory_order_relaxed ) );
+            not head.compare_exchange_strong ( old_counter_, new_counter, std::memory_order_acquire, std::memory_order_relaxed ) );
 
         old_counter_.external_count = new_counter.external_count;
     }
 
     nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
         counted_node_ptr node = { 1, &*it_ };
-        node.ptr->prev        = tail.load ( std::memory_order_relaxed );
-        while ( not tail.compare_exchange_weak ( node.ptr->prev, node, std::memory_order_release, std::memory_order_relaxed ) )
+        node.ptr->next        = head.load ( std::memory_order_relaxed );
+        while ( not head.compare_exchange_weak ( node.ptr->next, node, std::memory_order_release, std::memory_order_relaxed ) )
             yield ( );
         return std::forward<nodes_iterator> ( it_ );
     }
 
     public:
+    lock_free_plf_stack ( ) : head{ init_head ( ) } {}
+
     [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) { return insert_implementation ( nodes.emplace ( data_ ) ); }
     [[maybe_unused]] nodes_iterator push ( value_type && data_ ) {
         return insert_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
@@ -260,12 +279,12 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     }
 
     void pop ( ) noexcept {
-        counted_node_ptr old_tail = tail.load ( std::memory_order_relaxed );
+        counted_node_ptr old_head = head.load ( std::memory_order_relaxed );
         for ( ever ) {
-            increase_tail_count ( old_tail );
-            if ( node * const ptr = old_tail.ptr; ptr ) {
-                if ( tail.compare_exchange_strong ( old_tail, ptr->prev, std::memory_order_relaxed ) ) {
-                    int const count_increase = old_tail.external_count - 2;
+            increase_head_count ( old_head );
+            if ( node_ptr const ptr = old_head.ptr; ptr ) {
+                if ( head.compare_exchange_strong ( old_head, ptr->next, std::memory_order_relaxed ) ) {
+                    int const count_increase = old_head.external_count - 2;
                     if ( ptr->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
                         nodes.erase ( get_iterator_from_pointer ( ptr ) );
                     return;
@@ -288,21 +307,21 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     class const_iterator {
         friend class lock_free_plf_stack;
 
-        node const * p;
+        const_node_ptr p;
 
         public:
         using iterator_category = std::forward_iterator_tag;
 
-        const_iterator ( node const * p_ ) noexcept : p{ std::forward<node const *> ( p_ ) } {}
-        const_iterator ( const_iterator && it_ ) noexcept : p{ std::forward<node const *> ( it_.p ) } {}
+        const_iterator ( const_node_ptr p_ ) noexcept : p{ std::forward<const_node_ptr> ( p_ ) } {}
+        const_iterator ( const_iterator && it_ ) noexcept : p{ std::forward<const_node_ptr> ( it_.p ) } {}
         const_iterator ( const_iterator const & it_ ) noexcept : p{ it_.p } {}
-        [[maybe_unused]] const_iterator & operator= ( const_iterator && r_ ) noexcept { p = std::forward<node const *> ( r_.p ); }
+        [[maybe_unused]] const_iterator & operator= ( const_iterator && r_ ) noexcept { p = std::forward<const_node_ptr> ( r_.p ); }
         [[maybe_unused]] const_iterator & operator= ( const_iterator const & r_ ) noexcept { p = r_.p; }
 
         ~const_iterator ( ) = default;
 
         [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
-            p = p->prev.ptr;
+            p = p->next.ptr;
             return *this;
         }
         [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept { return p == r_.p; }
@@ -314,22 +333,22 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     class iterator {
         friend class lock_free_plf_stack;
 
-        node * p;
+        node_ptr p;
 
         public:
         using iterator_category = std::forward_iterator_tag;
 
-        iterator ( const_iterator it_ ) noexcept : p{ const_cast<node *> ( std::forward<node const *> ( it_.p ) ) } {}
-        iterator ( node * p_ ) noexcept : p{ std::forward<node *> ( p_ ) } {}
-        iterator ( iterator && it_ ) noexcept : p{ std::forward<node *> ( it_.p ) } {}
+        iterator ( const_iterator it_ ) noexcept : p{ const_cast<node_ptr> ( std::forward<const_node_ptr> ( it_.p ) ) } {}
+        iterator ( node_ptr p_ ) noexcept : p{ std::forward<node_ptr> ( p_ ) } {}
+        iterator ( iterator && it_ ) noexcept : p{ std::forward<node_ptr> ( it_.p ) } {}
         iterator ( iterator const & it_ ) noexcept : p{ it_.p } {}
-        [[maybe_unused]] iterator & operator= ( iterator && r_ ) noexcept { p = std::forward<node *> ( r_.p ); }
+        [[maybe_unused]] iterator & operator= ( iterator && r_ ) noexcept { p = std::forward<node_ptr> ( r_.p ); }
         [[maybe_unused]] iterator & operator= ( iterator const & r_ ) noexcept { p = r_.p; }
 
         ~iterator ( ) = default;
 
         [[maybe_unused]] iterator & operator++ ( ) noexcept {
-            p = p->prev.ptr;
+            p = p->next.ptr;
             return *this;
         }
         [[nodiscard]] bool operator== ( iterator const & r_ ) const noexcept { return p == r_.p; }
@@ -339,11 +358,11 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     };
 
     [[nodiscard]] const_iterator begin ( ) const noexcept {
-        const_iterator it = tail.load ( std::memory_order_relaxed ).ptr;
+        const_iterator it = head.load ( std::memory_order_relaxed ).ptr;
         ++it;
         return it;
     }
-    [[nodiscard]] const_iterator end ( ) const noexcept { return tail.load ( std::memory_order_relaxed ).ptr; }
+    [[nodiscard]] const_iterator end ( ) const noexcept { return head.load ( std::memory_order_relaxed ).ptr; }
 
     [[nodiscard]] const_iterator cbegin ( ) const noexcept { return begin ( ); }
     [[nodiscard]] const_iterator cend ( ) const noexcept { return end ( ); }
@@ -358,7 +377,34 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     [[nodiscard]] nodes_const_iterator end ( ) const noexcept { return nodes.end ( ); }
     [[nodiscard]] nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
     [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
+
+    private:
+    [[nodiscard]] static constexpr int log2 ( std::uint64_t v_ ) noexcept {
+        int c = !!v_;
+        while ( v_ >>= 1 )
+            c += 1;
+        return c;
+    }
+    template<typename U>
+    [[nodiscard]] static constexpr std::uint16_t abbreviate_pointer ( U const * pointer_ ) noexcept {
+        std::uintptr_t a = ( std::uintptr_t ) pointer_;
+        a >>= log2 ( alignof ( U ) ); // strip lower bits
+        a ^= a >> 32;                 // fold high over low
+        a ^= a >> 16;                 // fold high over low
+        return a;
+    }
+
+    counted_node_ptr init_head ( ) {
+        nodes_iterator it = nodes.emplace ( );
+        counted_node_ptr p;
+        p.ptr = &*it;
+        nodes.erase ( it );
+        return p;
+    }
 };
+
+template<typename T, typename Allocator>
+alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_stack<T, Allocator>::output_mutex;
 
 #undef ever
 

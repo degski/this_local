@@ -82,6 +82,12 @@ class this_local {
             self ( std::forward<this_id> ( t_ ) ), thread ( std::forward<thread_id> ( i_ ) ) {}
 
         [[nodiscard]] bool operator== ( key r_ ) const noexcept { return equal_m64 ( this, &r_ ); }
+
+        template<typename Stream>
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, key const & k_ ) noexcept {
+            out_ << '<' << k_.thread << '-' << k_.self << '>';
+            return out_;
+        }
     };
 
     struct node {
@@ -96,6 +102,16 @@ class this_local {
         node ( key && k_ ) noexcept : id ( std::forward<key> ( k_ ) ) {}
 
         [[nodiscard]] bool operator== ( node const & r_ ) const noexcept { return id == r_.id; }
+
+        template<typename Stream>
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const & n_ ) noexcept {
+            out_ << n_.id << "id";
+            return out_;
+        }
+        template<typename Stream>
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const * n_ ) noexcept {
+            return operator<< ( out_, *n_ );
+        }
     };
 
     // template<typename MessageType>

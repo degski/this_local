@@ -102,8 +102,22 @@ using sfc                                       = std::conditional_t<
 auto & rng = sfc::generator ( ); // always a reference, avoids checking for the tls-object's creation on every access.
 
 namespace test {
-void micro_sleep ( ) noexcept {
+inline void micro_sleep ( ) noexcept {
     std::this_thread::sleep_for ( std::chrono::microseconds ( sax::uniform_int_distribution<int> ( 0, 16 ) ( rng ) ) );
+}
+[[nodiscard]] inline constexpr int log2 ( std::uint64_t v_ ) noexcept {
+    int c = !!v_;
+    while ( v_ >>= 1 )
+        c += 1;
+    return c;
+}
+template<typename U>
+[[nodiscard]] inline constexpr std::uint16_t abbreviate_pointer ( U const * pointer_ ) noexcept {
+    std::uintptr_t a = ( std::uintptr_t ) pointer_;
+    a >>= log2 ( alignof ( U ) ); // strip lower bits
+    a ^= a >> 32;                 // fold high over low
+    a ^= a >> 16;                 // fold high over low
+    return a;
 }
 } // namespace test
 
@@ -186,7 +200,7 @@ int main5686780 ( ) {
 
 int main ( ) {
 
-    constexpr int N = 1'000;
+    constexpr int N = 4;
 
     sax::lock_free_plf_stack<int> stk;
 
@@ -203,6 +217,10 @@ int main ( ) {
 
     std::cout << std::boolalpha << ( ( ( N * ( N + 1 ) ) / 2 ) == sum ) << sp << std::dec << ( ( ( duration * 10 ) / N ) / 10.0 )
               << " ms/thread" << nl;
+
+    for ( auto & n : stk )
+        std::cout << n;
+    std::cout << nl;
 
     return EXIT_SUCCESS;
 }
