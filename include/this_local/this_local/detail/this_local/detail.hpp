@@ -195,10 +195,10 @@ struct slim_rw_lock final {
 template<typename T, typename Allocator = std::allocator<T>>
 class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed., Listing 7.13 - Anthony Williams
 
+    public:
     using value_type      = T;
     using pointer         = T *;
     using reference       = T &;
-    using difference_type = std::ptrdiff_t;
     using const_pointer   = T const *;
     using const_reference = T const &;
 
@@ -220,6 +220,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         lf_node ( Args &&... args_ ) : data{ std::forward<Args> ( args_ )... } {}
     };
 
+    private:
     using lf_nodes = plf::colony<lf_node, typename Allocator::template rebind<lf_node>::other>;
 
     using lf_nodes_iterator       = typename lf_nodes::iterator;
@@ -283,6 +284,8 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         }
     }
 
+    /*
+
     class iterator {
         friend class lock_free_plf_stack;
 
@@ -301,10 +304,6 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         ~iterator ( ) = default;
 
         [[maybe_unused]] iterator & operator++ ( ) noexcept {
-            p = p->prev.ptr;
-            return *this;
-        }
-        [[maybe_unused]] iterator & operator++ ( int ) noexcept {
             p = p->prev.ptr;
             return *this;
         }
@@ -337,41 +336,28 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
             p = p->prev.ptr;
             return *this;
         }
-        [[maybe_unused]] const_iterator & operator++ ( int ) noexcept {
-            p = p->prev.ptr;
-            return *this;
-        }
         [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept { return p == r_.p; }
         [[nodiscard]] bool operator!= ( const_iterator const & r_ ) const noexcept { return p != r_.p; }
         [[nodiscard]] const_reference operator* ( ) const noexcept { return p->data; }
         [[nodiscard]] const_pointer operator-> ( ) const noexcept { return &p->data; }
     };
 
-    [[nodiscard]] const_iterator begin ( ) const noexcept {
-        const_iterator it = { tail.load ( std::memory_order_relaxed ).ptr };
-        return ++it;
-    }
-    [[nodiscard]] const_iterator cbegin ( ) const noexcept {
-        const_iterator it = { tail.load ( std::memory_order_relaxed ).ptr };
-        return ++it;
-    }
-    [[nodiscard]] iterator begin ( ) noexcept {
-        iterator it = { tail.load ( std::memory_order_relaxed ).ptr };
-        return ++it;
-    }
+    [[nodiscard]] const_iterator begin ( ) const noexcept { return { tail.load ( std::memory_order_relaxed ).ptr }; }
+    [[nodiscard]] const_iterator cbegin ( ) const noexcept { return { tail.load ( std::memory_order_relaxed ).ptr }; }
+    [[nodiscard]] iterator begin ( ) noexcept { return { tail.load ( std::memory_order_relaxed ).ptr }; }
 
     [[nodiscard]] const_iterator end ( ) const noexcept { return { tail.load ( std::memory_order_relaxed ).ptr }; }
     [[nodiscard]] const_iterator cend ( ) const noexcept { return { tail.load ( std::memory_order_relaxed ).ptr }; }
     [[nodiscard]] iterator end ( ) noexcept { return { tail.load ( std::memory_order_relaxed ).ptr }; }
 
-    /*
+    */
+
     [[nodiscard]] lf_nodes_const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
     [[nodiscard]] lf_nodes_const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
     [[nodiscard]] lf_nodes_iterator begin ( ) noexcept { return nodes.begin ( ); }
     [[nodiscard]] lf_nodes_const_iterator end ( ) const noexcept { return nodes.end ( ); }
     [[nodiscard]] lf_nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
     [[nodiscard]] lf_nodes_iterator end ( ) noexcept { return nodes.end ( ); }
-    */
 
 }; // namespace sax
 

@@ -150,32 +150,11 @@ std::tuple<std::thread::id, int> work ( Type & vec_ ) {
 
     std::this_thread::sleep_for ( std::chrono::microseconds ( sax::uniform_int_distribution<int> ( 1, 20 ) ( rng ) ) );
 
-    vec_.emplace ( 1 ); // do something concurrently (f.e. push_back ())
-                        // vec_.this_local_storage.destroy ( std::this_thread::get_id ( ) ); // call the thread-destructor
+    vec_.emplace ( thread::get_id ( ) ); // do something concurrently (f.e. push_back ())
+    // vec_.this_local_storage.destroy ( std::this_thread::get_id ( ) ); // call the thread-destructor
 
     return { std::this_thread::get_id ( ), ctr++ };
 }
-
-template<typename value_type>
-struct ring {
-
-    struct node {
-        node * prev = nullptr;
-        value_type data;
-    };
-
-    template<typename... Args>
-    auto emplace ( Args &&... args_ ) {
-
-        // std::scoped_lock lock ( )
-        auto it = nodes.emplace ( std::forward<Args> ( args_ )... );
-        pointers.emplace_back ( &*it );
-        return it;
-    }
-
-    plf::colony<node> nodes;
-    plf::list<node *> pointers;
-};
 
 /*
 
@@ -216,9 +195,9 @@ int main ( ) {
     duration = static_cast<std::uint64_t> ( timer.get_elapsed_ms ( ) );
     std::cout << nl << duration << "ms" << nl;
 
-    std::set<int> p;
-    for ( auto node : stk )
-        p.emplace ( node );
+    std::set<void *> p;
+    for ( auto & node : stk )
+        p.emplace ( ( void * ) std::addressof ( node ) );
 
     std::cout << p.size ( ) << nl;
 
