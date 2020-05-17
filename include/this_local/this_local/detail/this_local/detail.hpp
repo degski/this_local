@@ -241,7 +241,6 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
 
     lf_nodes_iterator insert_implementation ( lf_nodes_iterator && it_ ) noexcept {
         counted_lf_node_ptr node = { 1, &*it_ };
-        node.ptr->data           = it_->data;
         node.ptr->prev           = tail.load ( std::memory_order_relaxed );
         while ( not tail.compare_exchange_weak ( node.ptr->prev, node, std::memory_order_release, std::memory_order_relaxed ) )
             yield ( );
