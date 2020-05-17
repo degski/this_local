@@ -94,20 +94,21 @@ struct alignas ( 16 ) uint128_t {
 };
 
 template<class T>
-inline bool dcas ( volatile T * src, T cmp, T with );
+inline bool double_compare_and_swap ( volatile T *, T, T ) noexcept;
 
 template<>
-inline bool dcas ( volatile sax::uint128_t * src, sax::uint128_t cmp, sax::uint128_t with ) {
+[[nodiscard]] inline bool double_compare_and_swap ( volatile sax::uint128_t * destination_, sax::uint128_t result_,
+                                                    sax::uint128_t exchange_ ) noexcept {
 #if ( defined( __clang__ ) or defined( __GNUC__ ) )
     bool result;
     __asm__ __volatile__( "lock cmpxchg16b %1\n\t"
                           "setz %0"
-                          : "=q"( result ), "+m"( *src ), "+d"( cmp.hi ), "+a"( cmp.lo )
-                          : "c"( with.hi ), "b"( with.lo )
+                          : "=q"( result ), "+m"( *destination_ ), "+d"( result_.hi ), "+a"( result_.lo )
+                          : "c"( exchange_.hi ), "b"( exchange_.lo )
                           : "cc" );
     return result;
 #else
-    return _InterlockedCompareExchange128 ( &src->lo, with.hi, with.lo, &cmp.lo );
+    return _InterlockedCompareExchange128 ( &destination_->lo, exchange_.hi, exchange_.lo, &result_.lo );
 #endif
 }
 
