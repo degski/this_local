@@ -272,19 +272,17 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     alignas ( 64 ) static spin_rw_lock<long long> output_mutex;
 
     private:
-    void increase_head_count ( counted_link & old_counter_ ) noexcept {
+    HEDLEY_ALWAYS_INLINE void increase_head_count ( counted_link & old_counter_ ) noexcept {
         counted_link new_counter;
-
         do {
             new_counter = old_counter_;
             new_counter.external_count += 1;
         } while (
             not head.compare_exchange_strong ( old_counter_, new_counter, std::memory_order_acquire, std::memory_order_relaxed ) );
-
         old_counter_.external_count = new_counter.external_count;
     }
 
-    nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
+    HEDLEY_ALWAYS_INLINE nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
         counted_link node = { 1, &*it_ };
         node.ptr->next    = head.load ( std::memory_order_relaxed );
         while ( not head.compare_exchange_weak ( node.ptr->next, node, std::memory_order_release, std::memory_order_relaxed ) )
@@ -447,33 +445,33 @@ class lock_free_plf_list { // straigth from: C++ Concurrency In Action, 2nd Ed.,
     using node_ptr       = node *;
     using const_node_ptr = node const *;
 
-    struct counted_link {
+    struct alignas ( 16 ) counted_link {
 
-        long long prev_external_count = 0, next_external_count = 0;
         node_ptr prev, next;
+        long long external_count = 0, _;
     };
 
     struct alignas ( 16 ) node {
 
-        std::atomic<long long> prev_internal_count, next_internal_count;
         counted_link ptr;
+        std::atomic<long long> internal_count = 0;
+
         value_type data;
 
         template<typename... Args>
-        node ( Args &&... args_ ) : prev_internal_count{ 0 }, next_internal_count{ 0 }, data{ std::forward<Args> ( args_ )... } {}
-        /*
-                template<typename Stream>
-                [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr n_ ) noexcept {
-                    std::scoped_lock lock ( lock_free_plf_list::output_mutex );
-                    out_ << '<' << lock_free_plf_list::abbreviate_pointer ( n_ ) << ' '
-                         << lock_free_plf_list::abbreviate_pointer ( n_->next.ptr ) << '>';
-                    return out_;
-                }
-                template<typename Stream>
-                [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const & n_ ) noexcept {
-                    return operator<< ( out_, &n_ );
-                }
-        */
+        node ( Args &&... args_ ) : internal_count{ 0 }, data{ std::forward<Args> ( args_ )... } {}
+
+        template<typename Stream>
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr n_ ) noexcept {
+            std::scoped_lock lock ( lock_free_plf_list::output_mutex );
+            out_ << '<' << lock_free_plf_list::abbreviate_pointer ( n_ ) << ' '
+                 << lock_free_plf_list::abbreviate_pointer ( n_->next.ptr ) << '>';
+            return out_;
+        }
+        template<typename Stream>
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const & n_ ) noexcept {
+            return operator<< ( out_, &n_ );
+        }
     };
 
     private:
@@ -485,26 +483,28 @@ class lock_free_plf_list { // straigth from: C++ Concurrency In Action, 2nd Ed.,
     nodes_type nodes;
     std::atomic<counted_link> head;
 
+    public:
     alignas ( 64 ) static spin_rw_lock<long long> output_mutex;
 
-    void increase_head_count ( counted_link & old_counter_ ) noexcept {
+    private:
+    HEDLEY_ALWAYS_INLINE void increase_head_count ( counted_link * old_counter_ ) noexcept {
         counted_link new_counter;
 
         do {
             new_counter = old_counter_;
-            new_counter.next_external_count += 1;
-            new_counter.prev_external_count += 1;
-        } while (
-            not head.compare_exchange_strong ( old_counter_, new_counter, std::memory_order_acquire, std::memory_order_relaxed ) );
-
-        old_counter_.next_external_count = new_counter.next_external_count;
-        old_counter_.prev_external_count = new_counter.prev_external_count;
+            new_counter.external_count += 1;
+        } while ( not double_compare_and_swap ( old_counter_, head, new_counter ) );
+        //   not head.compare_exchange_strong ( old_counter_, new_counter, std::memory_order_acquire, std::memory_order_relaxed )
+        //                                      expected      desired
+        old_counter_->external_count = new_counter.external_count;
     }
 
-    nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
-        counted_link node = { 1, &*it_ };
-        node.ptr->next    = head.load ( std::memory_order_relaxed );
-        while ( not head.compare_exchange_weak ( node.ptr->next, node, std::memory_order_release, std::memory_order_relaxed ) )
+    HEDLEY_ALWAYS_INLINE nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
+        counted_link new_node = { 1, &*it_ };
+        new_node.ptr->next    = head.load ( std::memory_order_relaxed );
+        while ( not double_compare_and_swap ( new_node.ptr->next, head, new_node ) )
+            //  not head.compare_exchange_weak ( new_node.ptr->next, new_node, std::memory_order_release, std::memory_order_relaxed
+            //  )
             yield ( );
         return std::forward<nodes_iterator> ( it_ );
     }
@@ -521,10 +521,11 @@ class lock_free_plf_list { // straigth from: C++ Concurrency In Action, 2nd Ed.,
         return insert_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
+    /*
     void pop ( ) noexcept {
         counted_link old_head = head.load ( std::memory_order_relaxed );
         for ( ever ) {
-            increase_head_count ( old_head );
+            increase_head_count ( &old_head );
             if ( node_ptr const ptr = old_head.ptr; ptr ) {
                 if ( head.compare_exchange_strong ( old_head, ptr->next, std::memory_order_relaxed ) ) {
                     int const count_increase = old_head.external_count - 2;
@@ -544,7 +545,7 @@ class lock_free_plf_list { // straigth from: C++ Concurrency In Action, 2nd Ed.,
             }
         }
     }
-
+    */
     /*
 
     class const_iterator {
@@ -621,13 +622,6 @@ class lock_free_plf_list { // straigth from: C++ Concurrency In Action, 2nd Ed.,
     [[nodiscard]] nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
     [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
 
-    private:
-    [[nodiscard]] static constexpr int log2 ( std::uint64_t v_ ) noexcept {
-        int c = !!v_;
-        while ( v_ >>= 1 )
-            c += 1;
-        return c;
-    }
     template<typename U>
     [[nodiscard]] static constexpr std::uint16_t abbreviate_pointer ( U const * pointer_ ) noexcept {
         std::uintptr_t a = ( std::uintptr_t ) pointer_;
@@ -637,6 +631,13 @@ class lock_free_plf_list { // straigth from: C++ Concurrency In Action, 2nd Ed.,
         return a;
     }
 
+    private:
+    [[nodiscard]] static constexpr int log2 ( std::uint64_t v_ ) noexcept {
+        int c = !!v_;
+        while ( v_ >>= 1 )
+            c += 1;
+        return c;
+    }
     counted_link init_head ( ) {
         nodes_iterator it = nodes.emplace ( );
         counted_link p;
