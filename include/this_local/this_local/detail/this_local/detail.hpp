@@ -202,35 +202,35 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     using const_pointer   = T const *;
     using const_reference = T const &;
 
-    struct lf_node;
+    struct node;
 
-    struct counted_lf_node_ptr {
+    struct counted_node_ptr {
 
         long long external_count = 0;
-        lf_node * ptr            = nullptr;
+        node * ptr               = nullptr;
     };
 
-    struct lf_node {
+    struct node {
 
         std::atomic<long long> internal_count = { 0 };
-        counted_lf_node_ptr prev              = { 0, this };
+        counted_node_ptr prev                 = { 0, this };
         value_type data;
 
         template<typename... Args>
-        lf_node ( Args &&... args_ ) : data{ std::forward<Args> ( args_ )... } {}
+        node ( Args &&... args_ ) : data{ std::forward<Args> ( args_ )... } {}
     };
 
     private:
-    using lf_nodes = plf::colony<lf_node, typename Allocator::template rebind<lf_node>::other>;
+    using nodes_type = plf::colony<node, typename Allocator::template rebind<node>::other>;
 
-    using lf_nodes_iterator       = typename lf_nodes::iterator;
-    using lf_nodes_const_iterator = typename lf_nodes::const_iterator;
+    using nodes_iterator       = typename nodes_type::iterator;
+    using nodes_const_iterator = typename nodes_type::const_iterator;
 
-    lf_nodes nodes;
-    std::atomic<counted_lf_node_ptr> tail;
+    nodes_type nodes;
+    std::atomic<counted_node_ptr> tail;
 
-    void increase_tail_count ( counted_lf_node_ptr & old_counter_ ) noexcept {
-        counted_lf_node_ptr new_counter;
+    void increase_tail_count ( counted_node_ptr & old_counter_ ) noexcept {
+        counted_node_ptr new_counter;
         do {
             new_counter = old_counter_;
             new_counter.external_count += 1;
@@ -239,31 +239,29 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         old_counter_.external_count = new_counter.external_count;
     }
 
-    lf_nodes_iterator insert_implementation ( lf_nodes_iterator && it_ ) noexcept {
-        counted_lf_node_ptr node = { 1, &*it_ };
-        node.ptr->prev           = tail.load ( std::memory_order_relaxed );
+    nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
+        counted_node_ptr node = { 1, &*it_ };
+        node.ptr->prev        = tail.load ( std::memory_order_relaxed );
         while ( not tail.compare_exchange_weak ( node.ptr->prev, node, std::memory_order_release, std::memory_order_relaxed ) )
             yield ( );
-        return std::forward<lf_nodes_iterator> ( it_ );
+        return std::forward<nodes_iterator> ( it_ );
     }
 
     public:
-    [[maybe_unused]] lf_nodes_iterator push ( value_type const & data_ ) {
-        return insert_implementation ( nodes.emplace ( data_ ) );
-    }
-    [[maybe_unused]] lf_nodes_iterator push ( value_type && data_ ) {
+    [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) { return insert_implementation ( nodes.emplace ( data_ ) ); }
+    [[maybe_unused]] nodes_iterator push ( value_type && data_ ) {
         return insert_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
-    [[maybe_unused]] lf_nodes_iterator emplace ( Args &&... args_ ) {
+    [[maybe_unused]] nodes_iterator emplace ( Args &&... args_ ) {
         return insert_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
     void pop ( ) noexcept {
-        counted_lf_node_ptr old_tail = tail.load ( std::memory_order_relaxed );
+        counted_node_ptr old_tail = tail.load ( std::memory_order_relaxed );
         for ( ever ) {
             increase_tail_count ( old_tail );
-            if ( lf_node * const ptr = old_tail.ptr; ptr ) {
+            if ( node * const ptr = old_tail.ptr; ptr ) {
                 if ( tail.compare_exchange_strong ( old_tail, ptr->prev, std::memory_order_relaxed ) ) {
                     int const count_increase = old_tail.external_count - 2;
                     if ( ptr->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
@@ -288,16 +286,16 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     class iterator {
         friend class lock_free_plf_stack;
 
-        lf_node * p;
+        node * p;
 
-        iterator ( lf_node * p_ ) noexcept : p{ std::forward<lf_node *> ( p_ ) } {}
+        iterator ( node * p_ ) noexcept : p{ std::forward<node *> ( p_ ) } {}
 
         public:
         using iterator_category = std::forward_iterator_tag;
 
-        iterator ( iterator && it_ ) noexcept : p{ std::forward<lf_node *> ( it_.p ) } {}
+        iterator ( iterator && it_ ) noexcept : p{ std::forward<node *> ( it_.p ) } {}
         iterator ( iterator const & it_ ) noexcept : p{ it_.p } {}
-        [[maybe_unused]] iterator & operator= ( iterator && r_ ) noexcept { p = std::forward<lf_node *> ( r_.p ); }
+        [[maybe_unused]] iterator & operator= ( iterator && r_ ) noexcept { p = std::forward<node *> ( r_.p ); }
         [[maybe_unused]] iterator & operator= ( iterator const & r_ ) noexcept { p = r_.p; }
 
         ~iterator ( ) = default;
@@ -315,17 +313,17 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     class const_iterator {
         friend class lock_free_plf_stack;
 
-        lf_node const * p;
+        node const * p;
 
-        const_iterator ( lf_node const * p_ ) noexcept : p{ std::forward<lf_node const *> ( p_ ) } {}
+        const_iterator ( node const * p_ ) noexcept : p{ std::forward<node const *> ( p_ ) } {}
 
         public:
         using iterator_category = std::forward_iterator_tag;
 
-        const_iterator ( const_iterator && it_ ) noexcept : p{ std::forward<lf_node *> ( it_.p ) } {}
+        const_iterator ( const_iterator && it_ ) noexcept : p{ std::forward<node *> ( it_.p ) } {}
         const_iterator ( const_iterator const & it_ ) noexcept : p{ it_.p } {}
         [[maybe_unused]] const_iterator & operator= ( const_iterator && r_ ) noexcept {
-            p = std::forward<lf_node const *> ( r_.p );
+            p = std::forward<node const *> ( r_.p );
         }
         [[maybe_unused]] const_iterator & operator= ( const_iterator const & r_ ) noexcept { p = r_.p; }
 
@@ -351,12 +349,12 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
 
     */
 
-    [[nodiscard]] lf_nodes_const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
-    [[nodiscard]] lf_nodes_const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
-    [[nodiscard]] lf_nodes_iterator begin ( ) noexcept { return nodes.begin ( ); }
-    [[nodiscard]] lf_nodes_const_iterator end ( ) const noexcept { return nodes.end ( ); }
-    [[nodiscard]] lf_nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
-    [[nodiscard]] lf_nodes_iterator end ( ) noexcept { return nodes.end ( ); }
+    [[nodiscard]] nodes_const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
+    [[nodiscard]] nodes_const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
+    [[nodiscard]] nodes_iterator begin ( ) noexcept { return nodes.begin ( ); }
+    [[nodiscard]] nodes_const_iterator end ( ) const noexcept { return nodes.end ( ); }
+    [[nodiscard]] nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
+    [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
 
 }; // namespace sax
 
