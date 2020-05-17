@@ -88,6 +88,29 @@ HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
 #endif
 }
 
+struct alignas ( 16 ) uint128_t {
+    long long lo;
+    long long hi;
+};
+
+template<class T>
+inline bool dcas ( volatile T * src, T cmp, T with );
+
+template<>
+inline bool dcas ( volatile sax::uint128_t * src, sax::uint128_t cmp, sax::uint128_t with ) {
+#if ( defined( __clang__ ) or defined( __GNUC__ ) )
+    bool result;
+    __asm__ __volatile__( "lock cmpxchg16b %1\n\t"
+                          "setz %0"
+                          : "=q"( result ), "+m"( *src ), "+d"( cmp.hi ), "+a"( cmp.lo )
+                          : "c"( with.hi ), "b"( with.lo )
+                          : "cc" );
+    return result;
+#else
+    return _InterlockedCompareExchange128 ( &src->lo, with.hi, with.lo, &cmp.lo );
+#endif
+}
+
 [[nodiscard]] bool has_thread_exited ( std::thread::native_handle_type handle_ ) noexcept {
 #if defined( _MSC_VER )
     FILETIME creationTime;
@@ -207,7 +230,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     using node_ptr       = node *;
     using const_node_ptr = node const *;
 
-    struct counted_node_ptr {
+    struct counted_link {
 
         long long external_count = 0;
         node_ptr ptr;
@@ -216,7 +239,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     struct alignas ( 16 ) node {
 
         std::atomic<long long> internal_count;
-        counted_node_ptr next;
+        counted_link next;
         value_type data;
 
         template<typename... Args>
@@ -242,12 +265,14 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     using nodes_const_iterator = typename nodes_type::const_iterator;
 
     nodes_type nodes;
-    std::atomic<counted_node_ptr> head;
+    std::atomic<counted_link> head;
 
+    public:
     alignas ( 64 ) static spin_rw_lock<long long> output_mutex;
 
-    void increase_head_count ( counted_node_ptr & old_counter_ ) noexcept {
-        counted_node_ptr new_counter;
+    private:
+    void increase_head_count ( counted_link & old_counter_ ) noexcept {
+        counted_link new_counter;
 
         do {
             new_counter = old_counter_;
@@ -259,8 +284,8 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     }
 
     nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
-        counted_node_ptr node = { 1, &*it_ };
-        node.ptr->next        = head.load ( std::memory_order_relaxed );
+        counted_link node = { 1, &*it_ };
+        node.ptr->next    = head.load ( std::memory_order_relaxed );
         while ( not head.compare_exchange_weak ( node.ptr->next, node, std::memory_order_release, std::memory_order_relaxed ) )
             yield ( );
         return std::forward<nodes_iterator> ( it_ );
@@ -279,7 +304,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     }
 
     void pop ( ) noexcept {
-        counted_node_ptr old_head = head.load ( std::memory_order_relaxed );
+        counted_link old_head = head.load ( std::memory_order_relaxed );
         for ( ever ) {
             increase_head_count ( old_head );
             if ( node_ptr const ptr = old_head.ptr; ptr ) {
@@ -378,6 +403,223 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     [[nodiscard]] nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
     [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
 
+    template<typename U>
+    [[nodiscard]] static constexpr std::uint16_t abbreviate_pointer ( U const * pointer_ ) noexcept {
+        std::uintptr_t a = ( std::uintptr_t ) pointer_;
+        a >>= log2 ( alignof ( U ) ); // strip lower bits
+        a ^= a >> 32;                 // fold high over low
+        a ^= a >> 16;                 // fold high over low
+        return ( std::uint16_t ) a;
+    }
+
+    private:
+    [[nodiscard]] static constexpr int log2 ( std::uint64_t v_ ) noexcept {
+        int c = !!v_;
+        while ( v_ >>= 1 )
+            c += 1;
+        return c;
+    }
+
+    counted_link init_head ( ) {
+        nodes_iterator it = nodes.emplace ( );
+        counted_link p;
+        p.ptr = &*it;
+        nodes.erase ( it );
+        return p;
+    }
+};
+
+template<typename T, typename Allocator>
+alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_stack<T, Allocator>::output_mutex;
+
+template<typename T, typename Allocator = std::allocator<T>>
+class lock_free_plf_list { // straigth from: C++ Concurrency In Action, 2nd Ed., Listing 7.13 - Anthony Williams
+
+    public:
+    using value_type      = T;
+    using pointer         = T *;
+    using reference       = T &;
+    using const_pointer   = T const *;
+    using const_reference = T const &;
+
+    struct node;
+    using node_ptr       = node *;
+    using const_node_ptr = node const *;
+
+    struct counted_link {
+
+        long long prev_external_count = 0, next_external_count = 0;
+        node_ptr prev, next;
+    };
+
+    struct alignas ( 16 ) node {
+
+        std::atomic<long long> prev_internal_count, next_internal_count;
+        counted_link ptr;
+        value_type data;
+
+        template<typename... Args>
+        node ( Args &&... args_ ) : prev_internal_count{ 0 }, next_internal_count{ 0 }, data{ std::forward<Args> ( args_ )... } {}
+        /*
+                template<typename Stream>
+                [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr n_ ) noexcept {
+                    std::scoped_lock lock ( lock_free_plf_list::output_mutex );
+                    out_ << '<' << lock_free_plf_list::abbreviate_pointer ( n_ ) << ' '
+                         << lock_free_plf_list::abbreviate_pointer ( n_->next.ptr ) << '>';
+                    return out_;
+                }
+                template<typename Stream>
+                [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const & n_ ) noexcept {
+                    return operator<< ( out_, &n_ );
+                }
+        */
+    };
+
+    private:
+    using nodes_type = plf::colony<node, typename Allocator::template rebind<node>::other>;
+
+    using nodes_iterator       = typename nodes_type::iterator;
+    using nodes_const_iterator = typename nodes_type::const_iterator;
+
+    nodes_type nodes;
+    std::atomic<counted_link> head;
+
+    alignas ( 64 ) static spin_rw_lock<long long> output_mutex;
+
+    void increase_head_count ( counted_link & old_counter_ ) noexcept {
+        counted_link new_counter;
+
+        do {
+            new_counter = old_counter_;
+            new_counter.next_external_count += 1;
+            new_counter.prev_external_count += 1;
+        } while (
+            not head.compare_exchange_strong ( old_counter_, new_counter, std::memory_order_acquire, std::memory_order_relaxed ) );
+
+        old_counter_.next_external_count = new_counter.next_external_count;
+        old_counter_.prev_external_count = new_counter.prev_external_count;
+    }
+
+    nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
+        counted_link node = { 1, &*it_ };
+        node.ptr->next    = head.load ( std::memory_order_relaxed );
+        while ( not head.compare_exchange_weak ( node.ptr->next, node, std::memory_order_release, std::memory_order_relaxed ) )
+            yield ( );
+        return std::forward<nodes_iterator> ( it_ );
+    }
+
+    public:
+    lock_free_plf_list ( ) : head{ init_head ( ) } {}
+
+    [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) { return insert_implementation ( nodes.emplace ( data_ ) ); }
+    [[maybe_unused]] nodes_iterator push ( value_type && data_ ) {
+        return insert_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+    }
+    template<typename... Args>
+    [[maybe_unused]] nodes_iterator emplace ( Args &&... args_ ) {
+        return insert_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+    }
+
+    void pop ( ) noexcept {
+        counted_link old_head = head.load ( std::memory_order_relaxed );
+        for ( ever ) {
+            increase_head_count ( old_head );
+            if ( node_ptr const ptr = old_head.ptr; ptr ) {
+                if ( head.compare_exchange_strong ( old_head, ptr->next, std::memory_order_relaxed ) ) {
+                    int const count_increase = old_head.external_count - 2;
+                    if ( ptr->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
+                        nodes.erase ( get_iterator_from_pointer ( ptr ) );
+                    return;
+                }
+                else {
+                    if ( ptr->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 ) {
+                        ptr->internal_count.load ( std::memory_order_acquire );
+                        nodes.erase ( get_iterator_from_pointer ( ptr ) );
+                    }
+                }
+            }
+            else {
+                return;
+            }
+        }
+    }
+
+    /*
+
+    class const_iterator {
+        friend class lock_free_plf_list;
+
+        const_node_ptr p;
+
+        public:
+        using iterator_category = std::forward_iterator_tag;
+
+        const_iterator ( const_node_ptr p_ ) noexcept : p{ std::forward<const_node_ptr> ( p_ ) } {}
+        const_iterator ( const_iterator && it_ ) noexcept : p{ std::forward<const_node_ptr> ( it_.p ) } {}
+        const_iterator ( const_iterator const & it_ ) noexcept : p{ it_.p } {}
+        [[maybe_unused]] const_iterator & operator= ( const_iterator && r_ ) noexcept { p = std::forward<const_node_ptr> ( r_.p ); }
+        [[maybe_unused]] const_iterator & operator= ( const_iterator const & r_ ) noexcept { p = r_.p; }
+
+        ~const_iterator ( ) = default;
+
+        [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
+            p = p->next.ptr;
+            return *this;
+        }
+        [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept { return p == r_.p; }
+        [[nodiscard]] bool operator!= ( const_iterator const & r_ ) const noexcept { return p != r_.p; }
+        [[nodiscard]] const_reference operator* ( ) const noexcept { return p->data; }
+        [[nodiscard]] const_pointer operator-> ( ) const noexcept { return &p->data; }
+    };
+
+    class iterator {
+        friend class lock_free_plf_list;
+
+        node_ptr p;
+
+        public:
+        using iterator_category = std::forward_iterator_tag;
+
+        iterator ( const_iterator it_ ) noexcept : p{ const_cast<node_ptr> ( std::forward<const_node_ptr> ( it_.p ) ) } {}
+        iterator ( node_ptr p_ ) noexcept : p{ std::forward<node_ptr> ( p_ ) } {}
+        iterator ( iterator && it_ ) noexcept : p{ std::forward<node_ptr> ( it_.p ) } {}
+        iterator ( iterator const & it_ ) noexcept : p{ it_.p } {}
+        [[maybe_unused]] iterator & operator= ( iterator && r_ ) noexcept { p = std::forward<node_ptr> ( r_.p ); }
+        [[maybe_unused]] iterator & operator= ( iterator const & r_ ) noexcept { p = r_.p; }
+
+        ~iterator ( ) = default;
+
+        [[maybe_unused]] iterator & operator++ ( ) noexcept {
+            p = p->next.ptr;
+            return *this;
+        }
+        [[nodiscard]] bool operator== ( iterator const & r_ ) const noexcept { return p == r_.p; }
+        [[nodiscard]] bool operator!= ( iterator const & r_ ) const noexcept { return p != r_.p; }
+        [[nodiscard]] reference operator* ( ) const noexcept { return p->data; }
+        [[nodiscard]] pointer operator-> ( ) const noexcept { return &p->data; }
+    };
+
+    [[nodiscard]] const_iterator begin ( ) const noexcept {
+        const_iterator it = head.load ( std::memory_order_relaxed ).ptr;
+        ++it;
+        return it;
+    }
+    [[nodiscard]] const_iterator end ( ) const noexcept { return head.load ( std::memory_order_relaxed ).ptr; }
+
+    [[nodiscard]] const_iterator cbegin ( ) const noexcept { return begin ( ); }
+    [[nodiscard]] const_iterator cend ( ) const noexcept { return end ( ); }
+    [[nodiscard]] iterator begin ( ) noexcept { return iterator{ const_cast<lock_free_plf_list const *> ( this )->begin ( ) }; }
+    [[nodiscard]] iterator end ( ) noexcept { return iterator{ const_cast<lock_free_plf_list const *> ( this )->end ( ) }; }
+
+    */
+
+    [[nodiscard]] nodes_const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
+    [[nodiscard]] nodes_const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
+    [[nodiscard]] nodes_iterator begin ( ) noexcept { return nodes.begin ( ); }
+    [[nodiscard]] nodes_const_iterator end ( ) const noexcept { return nodes.end ( ); }
+    [[nodiscard]] nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
+    [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
+
     private:
     [[nodiscard]] static constexpr int log2 ( std::uint64_t v_ ) noexcept {
         int c = !!v_;
@@ -394,9 +636,9 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         return a;
     }
 
-    counted_node_ptr init_head ( ) {
+    counted_link init_head ( ) {
         nodes_iterator it = nodes.emplace ( );
-        counted_node_ptr p;
+        counted_link p;
         p.ptr = &*it;
         nodes.erase ( it );
         return p;
@@ -404,7 +646,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
 };
 
 template<typename T, typename Allocator>
-alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_stack<T, Allocator>::output_mutex;
+alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_list<T, Allocator>::output_mutex;
 
 #undef ever
 

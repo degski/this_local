@@ -198,7 +198,7 @@ int main5686780 ( ) {
 
 */
 
-int main ( ) {
+int main78 ( ) {
 
     constexpr int N = 4;
 
@@ -221,6 +221,34 @@ int main ( ) {
     for ( auto & n : stk )
         std::cout << n;
     std::cout << nl;
+
+    return EXIT_SUCCESS;
+}
+
+void print_dlong ( char * address ) {
+
+    char * byte_array = address;
+    int i             = 0;
+    while ( i < 4 ) {
+        printf ( "%02X", ( int ) byte_array[ i ] );
+        i++;
+    }
+
+    printf ( "\n" );
+    printf ( "\n" );
+}
+
+int main ( ) {
+
+    sax::uint128_t test = { 0xdecafbad, 0xfeedbeef };
+    sax::uint128_t cmp  = test;
+    sax::uint128_t with = { 0x55555555, 0xaaaaaaaa };
+
+    print_dlong ( ( char * ) &test );
+    bool result = dcas ( &test, cmp, with );
+    print_dlong ( ( char * ) &test );
+
+    std::cout << result << nl;
 
     return EXIT_SUCCESS;
 }
