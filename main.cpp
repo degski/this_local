@@ -28,22 +28,23 @@
 #include <cstdint>
 #include <cstdlib>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
-#include <algorithm>
 #include <chrono>
-#include <sax/iostream.hpp>
+#include <jthread>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
+#include <numeric>
 #include <random>
+#include <sax/iostream.hpp>
 #include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <jthread>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -198,9 +199,7 @@ int main ( ) {
 
     duration = static_cast<std::uint64_t> ( timer.get_elapsed_ms ( ) );
 
-    int sum = 0;
-    for ( auto & node : stk )
-        sum += node.data;
+    int sum = std::accumulate ( stk.begin ( ), stk.end ( ), 0, [] ( auto & l, auto & r ) { return l + r.data; } );
 
     std::cout << std::boolalpha << ( ( ( N * ( N + 1 ) ) / 2 ) == sum ) << sp << std::dec << ( ( ( duration * 10 ) / N ) / 10.0 )
               << " ms/thread" << nl;
