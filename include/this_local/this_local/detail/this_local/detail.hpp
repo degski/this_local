@@ -89,8 +89,7 @@ HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
 }
 
 template<typename T>
-[[nodiscard]] inline bool dcas ( volatile T * destination_, T result_,
-                                                    T exchange_ ) noexcept {
+[[nodiscard]] inline bool dcas ( volatile T * destination_, T result_, T exchange_ ) noexcept {
     struct alignas ( 16 ) uint128_t {
         long long lo;
         long long hi;
@@ -251,7 +250,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr n_ ) noexcept {
             auto ap = [] ( auto p ) { return lock_free_plf_stack::abbreviate_pointer ( p ); };
             std::scoped_lock lock ( lock_free_plf_stack::output_mutex );
-            out_ << '<' << ap( n_ ) << ' ' << ap ( n_->link.next ) << '>';
+            out_ << '<' << ap ( n_ ) << ' ' << ap ( n_->link.next ) << '>';
             return out_;
         }
         template<typename Stream>
@@ -287,7 +286,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
 
     [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
         counted_link link = { &*it_, 1 };
-        link.next->link    = head.load ( std::memory_order_relaxed );
+        link.next->link   = head.load ( std::memory_order_relaxed );
         while ( not head.compare_exchange_weak ( link.next->link, link, std::memory_order_release, std::memory_order_relaxed ) )
             yield ( );
         return std::forward<nodes_iterator> ( it_ );
@@ -409,8 +408,8 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     [[nodiscard]] static constexpr std::uint16_t abbreviate_pointer ( U const * pointer_ ) noexcept {
         std::uintptr_t a = ( std::uintptr_t ) pointer_;
         a >>= ilog2 ( alignof ( U ) ); // strip lower bits
-        a ^= a >> 32;                 // fold high over low
-        a ^= a >> 16;                 // fold high over low
+        a ^= a >> 32;                  // fold high over low
+        a ^= a >> 16;                  // fold high over low
         return ( std::uint16_t ) a;
     }
 
@@ -452,6 +451,12 @@ class lock_free_plf_list {
 
         alignas ( 16 ) node_ptr prev, next;
         unsigned long long external_count;
+
+        [[nodiscard]] static counted_link fission ( node_ptr prev_, node_ptr new_ ) noexcept {
+            counted_link new_link = { prev_, prev_->link.next, prev_->link.external_count };
+            new_->link            = { prev_->link.prev, new_, prev_->link.external_count };
+            return new_link;
+        }
     };
 
     struct node {
@@ -507,32 +512,24 @@ class lock_free_plf_list {
             new_counter = *old_counter_;
             new_counter.external_count += 1;
         } while ( not dcas ( old_counter_, anchor.load ( std::memory_order_relaxed )->link,
-                                                new_counter ) ); // not head.compare_exchange_strong ( old_counter_, new_counter,
-                                                                 // std::memory_order_acquire, std::memory_order_relaxed )
+                             new_counter ) ); // not head.compare_exchange_strong ( old_counter_, new_counter,
+                                              // std::memory_order_acquire, std::memory_order_relaxed )
         old_counter_->external_count = new_counter.external_count;
     }
 
     [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
-        node_ptr next      = &*it_;
-
-        counted_link link = { nullptr, next, 1 };
-        next->link         = { anchor.load ( std::memory_order_relaxed ), next, 1 };
-        link.prev          = link.next->link.prev;
-
-        while ( not dcas ( &link.next->link, anchor.load ( std::memory_order_relaxed )->link,
-                                              link ) )
+        node_ptr new_     = &*it_;
+        counted_link link = counted_link::fission ( anchor.load ( std::memory_order_relaxed ), new_ );
+        while ( not dcas ( &link.next->link, anchor.load ( std::memory_order_relaxed )->link, link ) )
             continue;
-
-        anchor.store ( std::forward<node_ptr> ( next ), std::memory_order_relaxed );
+        anchor.store ( std::forward<node_ptr> ( new_ ), std::memory_order_relaxed );
         return std::forward<nodes_iterator> ( it_ );
     }
 
     [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_anchor_implementation ( nodes_iterator && it_ ) noexcept {
-        node_ptr next = &*it_;
-
-        next->link = { next, next, 1 };
-
-        anchor.store ( std::forward<node_ptr> ( next ), std::memory_order_relaxed );
+        node_ptr new_ = &*it_;
+        new_->link    = { new_, new_, 1 };
+        anchor.store ( std::forward<node_ptr> ( new_ ), std::memory_order_relaxed );
         return std::forward<nodes_iterator> ( it_ );
     }
 
@@ -681,8 +678,8 @@ class lock_free_plf_list {
     [[nodiscard]] static constexpr std::uint16_t abbreviate_pointer ( U const * pointer_ ) noexcept {
         std::uintptr_t a = ( std::uintptr_t ) pointer_;
         a >>= ilog2 ( alignof ( U ) ); // strip lower bits
-        a ^= a >> 32;                 // fold high over low
-        a ^= a >> 16;                 // fold high over low
+        a ^= a >> 32;                  // fold high over low
+        a ^= a >> 16;                  // fold high over low
         return a;
     }
 
