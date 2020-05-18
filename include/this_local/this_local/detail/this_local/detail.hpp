@@ -88,27 +88,29 @@ HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
 #endif
 }
 
-struct alignas ( 16 ) uint128_t {
-    long long lo;
-    long long hi;
-};
+template<typename T>
+[[nodiscard]] inline bool dcas ( volatile T * destination_, T result_,
+                                                    T exchange_ ) noexcept {
+    struct alignas ( 16 ) uint128_t {
+        long long lo;
+        long long hi;
+    };
 
-template<class T>
-inline bool double_compare_and_swap ( volatile T *, T, T ) noexcept;
+    uint128_t result;
+    memcpy ( &result, &result_, sizeof ( result ) );
+    uint128_t exchange;
+    memcpy ( &exchange, &exchange_, sizeof ( exchange ) );
 
-template<>
-[[nodiscard]] inline bool double_compare_and_swap ( volatile sax::uint128_t * destination_, sax::uint128_t result_,
-                                                    sax::uint128_t exchange_ ) noexcept {
 #if ( defined( __clang__ ) or defined( __GNUC__ ) )
-    bool result;
+    bool value;
     __asm__ __volatile__( "lock cmpxchg16b %1\n\t"
                           "setz %0"
-                          : "=q"( result ), "+m"( *destination_ ), "+d"( result_.hi ), "+a"( result_.lo )
-                          : "c"( exchange_.hi ), "b"( exchange_.lo )
+                          : "=q"( value ), "+m"( *destination_ ), "+d"( result.hi ), "+a"( result.lo )
+                          : "c"( exchange.hi ), "b"( exchange.lo )
                           : "cc" );
-    return result;
+    return value;
 #else
-    return _InterlockedCompareExchange128 ( &destination_->lo, exchange_.hi, exchange_.lo, &result_.lo );
+    return _InterlockedCompareExchange128 ( &destination_->lo, exchange.hi, exchange.lo, &result.lo );
 #endif
 }
 
@@ -237,7 +239,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         long long external_count = 0;
     };
 
-    struct alignas ( 16 ) node {
+    struct node {
 
         counted_link link;
         std::atomic<long long> internal_count;
@@ -247,9 +249,9 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
 
         template<typename Stream>
         [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr n_ ) noexcept {
+            auto ap = [] ( auto p ) { return lock_free_plf_stack::abbreviate_pointer ( p ); };
             std::scoped_lock lock ( lock_free_plf_stack::output_mutex );
-            out_ << '<' << lock_free_plf_stack::abbreviate_pointer ( n_ ) << ' '
-                 << lock_free_plf_stack::abbreviate_pointer ( n_->link.next ) << '>';
+            out_ << '<' << ap( n_ ) << ' ' << ap ( n_->link.next ) << '>';
             return out_;
         }
         template<typename Stream>
@@ -283,10 +285,10 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         old_counter_.external_count = new_counter.external_count;
     }
 
-    HEDLEY_ALWAYS_INLINE nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
-        counted_link node = { 1, &*it_ };
-        node.next->link    = head.load ( std::memory_order_relaxed );
-        while ( not head.compare_exchange_weak ( node.next->link, node, std::memory_order_release, std::memory_order_relaxed ) )
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
+        counted_link link = { &*it_, 1 };
+        link.next->link    = head.load ( std::memory_order_relaxed );
+        while ( not head.compare_exchange_weak ( link.next->link, link, std::memory_order_release, std::memory_order_relaxed ) )
             yield ( );
         return std::forward<nodes_iterator> ( it_ );
     }
@@ -449,22 +451,22 @@ class lock_free_plf_list {
     struct counted_link {
 
         alignas ( 16 ) node_ptr prev, next;
-        long long external_count = 0;
+        unsigned long long external_count;
     };
 
     struct node {
 
         counted_link link;
-        std::atomic<long long> internal_count = 0;
+        std::atomic<unsigned long long> internal_count = { 0 };
 
         template<typename... Args>
         node ( Args &&... args_ ) : data{ std::forward<Args> ( args_ )... } {}
 
         template<typename Stream>
         [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr n_ ) noexcept {
+            auto ap = [] ( auto p ) { return lock_free_plf_list::abbreviate_pointer ( p ); };
             std::scoped_lock lock ( lock_free_plf_list::output_mutex );
-            out_ << '<' << lock_free_plf_list::abbreviate_pointer ( n_ ) << ' '
-                 << lock_free_plf_list::abbreviate_pointer ( n_->link.next ) << '>';
+            out_ << '<' << ap ( n_ ) << ' ' << ap ( n_->link.prev ) << ' ' << ap ( n_->link.next ) << '>';
             return out_;
         }
         template<typename Stream>
@@ -504,27 +506,33 @@ class lock_free_plf_list {
         do {
             new_counter = *old_counter_;
             new_counter.external_count += 1;
-        } while ( not double_compare_and_swap ( old_counter_, *anchor->load ( std::memory_order_relaxed ),
+        } while ( not dcas ( old_counter_, anchor.load ( std::memory_order_relaxed )->link,
                                                 new_counter ) ); // not head.compare_exchange_strong ( old_counter_, new_counter,
                                                                  // std::memory_order_acquire, std::memory_order_relaxed )
         old_counter_->external_count = new_counter.external_count;
     }
 
     [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
-        node_ptr new_ptr      = &*it_;
-        counted_link new_node = { anchor.load ( std::memory_order_relaxed ), new_ptr, 1 };
-        while ( not double_compare_and_swap ( new_node.next, *new_node.next,
-                                              new_node ) ) // not head.compare_exchange_weak ( new_node.link->next, new_node,
-                                                           // std::memory_order_release, std::memory_order_relaxed )
-            yield ( );
-        anchor.store ( std::forward<node_ptr> ( new_ptr ), std::memory_order_relaxed );
+        node_ptr next      = &*it_;
+
+        counted_link link = { nullptr, next, 1 };
+        next->link         = { anchor.load ( std::memory_order_relaxed ), next, 1 };
+        link.prev          = link.next->link.prev;
+
+        while ( not dcas ( &link.next->link, anchor.load ( std::memory_order_relaxed )->link,
+                                              link ) )
+            continue;
+
+        anchor.store ( std::forward<node_ptr> ( next ), std::memory_order_relaxed );
         return std::forward<nodes_iterator> ( it_ );
     }
 
     [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_anchor_implementation ( nodes_iterator && it_ ) noexcept {
-        node_ptr new_ptr = &*it_;
-        new_ptr->link     = { new_ptr, new_ptr, 1 };
-        anchor.store ( std::forward<node_ptr> ( new_ptr ), std::memory_order_relaxed );
+        node_ptr next = &*it_;
+
+        next->link = { next, next, 1 };
+
+        anchor.store ( std::forward<node_ptr> ( next ), std::memory_order_relaxed );
         return std::forward<nodes_iterator> ( it_ );
     }
 
