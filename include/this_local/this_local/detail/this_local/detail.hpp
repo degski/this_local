@@ -432,7 +432,7 @@ template<typename T, typename Allocator>
 alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_stack<T, Allocator>::output_mutex;
 
 template<typename T, typename Allocator = std::allocator<T>>
-class lock_free_plf_list { // straigth from: C++ Concurrency In Action, 2nd Ed., Listing 7.13 - Anthony Williams
+class lock_free_plf_list {
 
     public:
     using value_type      = T;
@@ -481,43 +481,80 @@ class lock_free_plf_list { // straigth from: C++ Concurrency In Action, 2nd Ed.,
     using nodes_const_iterator = typename nodes_type::const_iterator;
 
     nodes_type nodes;
-    std::atomic<counted_link> head;
+    node_ptr anchor = nullptr;
 
     public:
     alignas ( 64 ) static spin_rw_lock<long long> output_mutex;
 
     private:
-    HEDLEY_ALWAYS_INLINE void increase_head_count ( counted_link * old_counter_ ) noexcept {
+    HEDLEY_ALWAYS_INLINE void increase_external_count ( counted_link * old_counter_ ) noexcept {
         counted_link new_counter;
-
         do {
-            new_counter = old_counter_;
+            new_counter = *old_counter_;
             new_counter.external_count += 1;
-        } while ( not double_compare_and_swap ( old_counter_, head, new_counter ) );
-        //   not head.compare_exchange_strong ( old_counter_, new_counter, std::memory_order_acquire, std::memory_order_relaxed )
-        //                                      expected      desired
+        } while ( not double_compare_and_swap ( old_counter_, head,
+                                                new_counter ) ); // not head.compare_exchange_strong ( old_counter_, new_counter,
+                                                                 // std::memory_order_acquire, std::memory_order_relaxed )
         old_counter_->external_count = new_counter.external_count;
     }
 
     HEDLEY_ALWAYS_INLINE nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
         counted_link new_node = { 1, &*it_ };
-        new_node.ptr->next    = head.load ( std::memory_order_relaxed );
-        while ( not double_compare_and_swap ( new_node.ptr->next, head, new_node ) )
-            //  not head.compare_exchange_weak ( new_node.ptr->next, new_node, std::memory_order_release, std::memory_order_relaxed
-            //  )
+        new_node.ptr->next    = anchor->load ( std::memory_order_relaxed );
+        while ( not double_compare_and_swap ( new_node.ptr->next, head,
+                                              new_node ) ) // not head.compare_exchange_weak ( new_node.ptr->next, new_node,
+                                                           // std::memory_order_release, std::memory_order_relaxed )
             yield ( );
+        return std::forward<nodes_iterator> ( it_ );
+    }
+
+    HEDLEY_ALWAYS_INLINE nodes_iterator insert_anchor_implementation ( nodes_iterator && it_ ) noexcept {
+        anchor                     = &*it_;
+        anchor->ptr.prev           = anchor;
+        anchor->ptr.next           = anchor;
+        anchor->ptr.external_count = 1;
         return std::forward<nodes_iterator> ( it_ );
     }
 
     public:
     lock_free_plf_list ( ) : head{ init_head ( ) } {}
 
-    [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) { return insert_implementation ( nodes.emplace ( data_ ) ); }
+    [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) {
+        if ( HEDLEY_LIKELY ( anchor ) )
+            return insert_implementation ( nodes.emplace ( data_ ) );
+        return insert_anchor_implementation ( nodes.emplace ( data_ ) );
+    }
     [[maybe_unused]] nodes_iterator push ( value_type && data_ ) {
-        return insert_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+        if ( HEDLEY_LIKELY ( anchor ) )
+            return insert_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+        return insert_anchor_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
     [[maybe_unused]] nodes_iterator emplace ( Args &&... args_ ) {
+        if ( HEDLEY_LIKELY ( anchor ) )
+            return insert_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+        return insert_anchor_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+    }
+
+    [[maybe_unused]] nodes_iterator push_anchor ( value_type const & data_ ) {
+        return insert_anchor_implementation ( nodes.emplace ( data_ ) );
+    }
+    [[maybe_unused]] nodes_iterator push_anchor ( value_type && data_ ) {
+        return insert_anchor_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+    }
+    template<typename... Args>
+    [[maybe_unused]] nodes_iterator emplace_anchor ( Args &&... args_ ) {
+        return insert_anchor_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+    }
+
+    [[maybe_unused]] nodes_iterator push_anchored ( value_type const & data_ ) {
+        return insert_implementation ( nodes.emplace ( data_ ) );
+    }
+    [[maybe_unused]] nodes_iterator push_anchored ( value_type && data_ ) {
+        return insert_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+    }
+    template<typename... Args>
+    [[maybe_unused]] nodes_iterator emplace_anchored ( Args &&... args_ ) {
         return insert_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
@@ -525,7 +562,7 @@ class lock_free_plf_list { // straigth from: C++ Concurrency In Action, 2nd Ed.,
     void pop ( ) noexcept {
         counted_link old_head = head.load ( std::memory_order_relaxed );
         for ( ever ) {
-            increase_head_count ( &old_head );
+            increase_external_count ( &old_head );
             if ( node_ptr const ptr = old_head.ptr; ptr ) {
                 if ( head.compare_exchange_strong ( old_head, ptr->next, std::memory_order_relaxed ) ) {
                     int const count_increase = old_head.external_count - 2;
@@ -638,10 +675,9 @@ class lock_free_plf_list { // straigth from: C++ Concurrency In Action, 2nd Ed.,
             c += 1;
         return c;
     }
-    counted_link init_head ( ) {
+    node_ptr init ( ) {
         nodes_iterator it = nodes.emplace ( );
-        counted_link p;
-        p.ptr = &*it;
+        node_ptr p        = &*it;
         nodes.erase ( it );
         return p;
     }
