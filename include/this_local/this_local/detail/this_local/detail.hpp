@@ -448,13 +448,14 @@ class lock_free_plf_list {
     struct alignas ( 16 ) counted_link {
 
         node_ptr prev, next;
-        long long external_count = 0, _;
+        long long external_count = 0;
+        spin_rw_lock<long long> mutex;
     };
 
     struct alignas ( 16 ) node {
 
         counted_link ptr;
-        std::atomic<long long> internal_count = 0;
+        std::atomic<long long> internal_count;
 
         value_type data;
 
@@ -481,7 +482,7 @@ class lock_free_plf_list {
     using nodes_const_iterator = typename nodes_type::const_iterator;
 
     nodes_type nodes;
-    node_ptr anchor = nullptr;
+    std::atomic<node_ptr> anchor = nullptr;
 
     public:
     alignas ( 64 ) static spin_rw_lock<long long> output_mutex;
@@ -492,19 +493,20 @@ class lock_free_plf_list {
         do {
             new_counter = *old_counter_;
             new_counter.external_count += 1;
-        } while ( not double_compare_and_swap ( old_counter_, head,
+        } while ( not double_compare_and_swap ( old_counter_, *anchor->load ( std::memory_order_relaxed ),
                                                 new_counter ) ); // not head.compare_exchange_strong ( old_counter_, new_counter,
                                                                  // std::memory_order_acquire, std::memory_order_relaxed )
         old_counter_->external_count = new_counter.external_count;
     }
 
     HEDLEY_ALWAYS_INLINE nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
-        counted_link new_node = { 1, &*it_ };
-        new_node.ptr->next    = anchor->load ( std::memory_order_relaxed );
-        while ( not double_compare_and_swap ( new_node.ptr->next, head,
+        pointer new_ptr       = &*it_;
+        counted_link new_node = { new_ptr, anchor->load ( std::memory_order_relaxed ), 1 };
+        while ( not double_compare_and_swap ( new_node.ptr->next, *new_node.ptr->next,
                                               new_node ) ) // not head.compare_exchange_weak ( new_node.ptr->next, new_node,
                                                            // std::memory_order_release, std::memory_order_relaxed )
             yield ( );
+        anchor.store ( new_ptr, std::memory_order_relaxed );
         return std::forward<nodes_iterator> ( it_ );
     }
 
