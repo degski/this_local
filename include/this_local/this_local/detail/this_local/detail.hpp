@@ -517,8 +517,6 @@ class lock_free_plf_list {
     }
 
     public:
-    lock_free_plf_list ( ) : head{ init_head ( ) } {}
-
     [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) {
         if ( HEDLEY_LIKELY ( anchor ) )
             return insert_implementation ( nodes.emplace ( data_ ) );
@@ -666,20 +664,6 @@ class lock_free_plf_list {
         a ^= a >> 32;                 // fold high over low
         a ^= a >> 16;                 // fold high over low
         return a;
-    }
-
-    private:
-    [[nodiscard]] static constexpr int log2 ( std::uint64_t v_ ) noexcept {
-        int c = !!v_;
-        while ( v_ >>= 1 )
-            c += 1;
-        return c;
-    }
-    node_ptr init ( ) {
-        nodes_iterator it = nodes.emplace ( );
-        node_ptr p        = &*it;
-        nodes.erase ( it );
-        return p;
     }
 };
 
