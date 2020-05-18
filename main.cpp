@@ -202,14 +202,14 @@ int main ( ) {
 
     constexpr int N = 4;
 
-    sax::lock_free_plf_stack<int> stk;
+    sax::lock_free_plf_list<int> stk;
 
     std::uint64_t duration;
     plf::nanotimer timer;
     timer.start ( );
 
     for ( int n = 0; n < N; ++n )
-        std::jthread{ work<sax::lock_free_plf_stack<int>>, std::ref ( stk ) };
+        std::jthread{ work<sax::lock_free_plf_list<int>>, std::ref ( stk ) };
 
     duration = static_cast<std::uint64_t> ( timer.get_elapsed_ms ( ) );
 
