@@ -91,7 +91,7 @@ HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
 }
 
 template<typename P, typename T, typename U>
-[[nodiscard]] inline bool dcas ( P * destination_, T result_, U exchange_ ) noexcept {
+[[nodiscard]] inline bool dwcas ( P * destination_, T result_, U exchange_ ) noexcept {
 
     static_assert ( sizeof ( T ) >= 16, "size >= 16" );
     static_assert ( sizeof ( T ) >= sizeof ( U ), "size error" );
@@ -536,6 +536,7 @@ class lock_free_plf_list {
     public:
     spin_rw_lock<char> instance;
     alignas ( 64 ) static spin_rw_lock<long long> global;
+    alignas ( 64 ) static spin_rw_lock<long long> cas;
 
     lock_free_plf_list ( ) : insert_implementation{ &lock_free_plf_list::insert_first_implementation } {}
 
@@ -554,9 +555,9 @@ class lock_free_plf_list {
         do {
             new_counter = *old_counter_;
             new_counter.external_count += 1;
-        } while ( not dcas ( old_counter_, back.load ( std::memory_order_relaxed ),
-                             new_counter ) ); // not head.compare_exchange_strong ( old_counter_, new_counter,
-                                              // std::memory_order_acquire, std::memory_order_relaxed )
+        } while ( not dwcas ( old_counter_, back.load ( std::memory_order_relaxed ),
+                              new_counter ) ); // not head.compare_exchange_strong ( old_counter_, new_counter,
+                                               // std::memory_order_acquire, std::memory_order_relaxed )
         old_counter_->external_count = new_counter.external_count;
     }
 
@@ -599,10 +600,11 @@ class lock_free_plf_list {
     }
 
     template<typename A, typename B>
-    [[nodiscard]] bool cas ( A * p_, B old_, A new_ ) const noexcept {
-        if ( *p_ != old_ )
+    [[nodiscard]] bool soft_dwcas ( A * old_location_, B old_copy_, A new_value_ ) const noexcept {
+        std::scoped_lock lock ( cas );
+        if ( not equal_m128 ( old_location_, &old_copy_ ) )
             return false;
-        *p_ = new_;
+        std::memcpy ( old_location_, &new_value_, sizeof ( A ) );
         return true;
     }
 
@@ -618,7 +620,7 @@ class lock_free_plf_list {
         return std::forward<nodes_iterator> ( it_ );
     }
 
-    // while ( not dcas ( link.next, back.load ( std::memory_order_relaxed ), link ) )
+    // while ( not dwcas ( link.next, back.load ( std::memory_order_relaxed ), link ) )
     //     yield ( );
 
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_first_implementation ( nodes_iterator && it_ ) noexcept {
@@ -761,6 +763,9 @@ class lock_free_plf_list {
 
 template<typename T, typename Allocator>
 alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_list<T, Allocator>::global;
+
+template<typename T, typename Allocator>
+alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_list<T, Allocator>::cas;
 
 #undef ever
 
