@@ -563,8 +563,9 @@ class lock_free_plf_list {
 
     [[nodiscard]] HEDLEY_ALWAYS_INLINE counted_link get_link ( node_ptr new_node_,
                                                                counted_node_link prev_link_ ) noexcept { // has side-effects
+
         counted_link new_link             = { prev_link_.prev, ( counted_link_ptr ) new_node_, 5 /* prev_link_.external_count */ };
-        ( ( counted_link & ) *new_node_ ) = { ( counted_link_ptr ) prev_link_.node, prev_link_.next,
+        ( ( counted_link & ) *new_node_ ) = { ( counted_link_ptr ) prev_link_.prev, prev_link_.next,
                                               10 /* prev_link_.external_count */ };
         return new_link;
     }
@@ -584,27 +585,36 @@ class lock_free_plf_list {
         std::cout << link << nl;
         std::cout << nl;
 
-        exit ( 0 );
+        // while ( not
+        soft_dwcas ( link.next, back.load ( std::memory_order_relaxed ), link ); // )
+                                                                                 //     yield ( );
 
-        /*
-        counted_node_link last = back.load ( std::memory_order_relaxed );
-        link.next->prev        = regular;
-        std::swap ( ( counted_link & ) *link.next, ( counted_link & ) last );
-
-        last.node = regular;
-
-        back.store ( std::move ( last ), std::memory_order_relaxed );
-        */
-        // back_store ( regular );
+        back_store ( regular );
+        regular->next->prev = regular;
         return std::forward<nodes_iterator> ( it_ );
     }
 
+    // Algorithms built around CAS typically read some key memory location and remember the old value. Based on that old value, they
+    // compute some new value. Then they try to swap in the new value using CAS, where the comparison checks for the location still
+    // being equal to the old value. If CAS indicates that the attempt has failed, it has to be repeated from the beginning: the
+    // location is re-read, a new value is re-computed and the CAS is tried again. Instead of immediately retrying after a CAS
+    // operation fails, researchers have found that total system performance can be improved in multiprocessor systems—where many
+    // threads constantly update some particular shared variable if threads that see their CAS fail use exponential backoff, in
+    // other words, wait a little before retrying the CAS.
+
+    // while ( not dwcas ( link.next, back.load ( std::memory_order_relaxed ), link ) )
+    //     yield ( );
+
     template<typename A, typename B>
-    [[nodiscard]] bool soft_dwcas ( A * old_location_, B old_copy_, A new_value_ ) const noexcept {
+    // [[nodiscard]]
+    bool soft_dwcas ( A * old_location_, B old_copy_, A new_value_ ) const noexcept {
         std::scoped_lock lock ( cas );
-        if ( not equal_m128 ( old_location_, &old_copy_ ) )
+        if ( not equal_m128 ( old_location_, &old_copy_ ) ) {
+            std::cout << "swapped: false" << nl;
             return false;
-        std::memcpy ( old_location_, &new_value_, sizeof ( A ) );
+        }
+        std::memcpy ( old_location_, &new_value_, 16 );
+        std::cout << "swapped: true" << nl;
         return true;
     }
 
@@ -619,9 +629,6 @@ class lock_free_plf_list {
         insert_implementation = &lock_free_plf_list::insert_regular_implementation;
         return std::forward<nodes_iterator> ( it_ );
     }
-
-    // while ( not dwcas ( link.next, back.load ( std::memory_order_relaxed ), link ) )
-    //     yield ( );
 
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_first_implementation ( nodes_iterator && it_ ) noexcept {
         std::scoped_lock lock ( instance );
