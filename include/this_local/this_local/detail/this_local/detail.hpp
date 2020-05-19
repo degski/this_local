@@ -513,6 +513,11 @@ class lock_free_plf_list {
                  << '>';
             return out_;
         }
+
+        [[nodiscard]] bool operator== ( counted_link const & r_ ) const noexcept {
+            return equal_m128 ( this, &r_ );
+            // counted_link::prev == r_.prev and counted_link::next == r_.next;
+        }
     };
 
     using counted_node_link_ptr       = counted_node_link *;
@@ -591,6 +596,14 @@ class lock_free_plf_list {
         */
         // back_store ( regular );
         return std::forward<nodes_iterator> ( it_ );
+    }
+
+    template<typename A, typename B>
+    [[nodiscard]] bool cas ( A * p_, B old_, A new_ ) const noexcept {
+        if ( *p_ != old_ )
+            return false;
+        *p_ = new_;
+        return true;
     }
 
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_second_implementation ( nodes_iterator && it_ ) noexcept {
@@ -744,7 +757,7 @@ class lock_free_plf_list {
     }
 
     static constexpr int offset_data = static_cast<int> ( offsetof ( node, data ) );
-}; // namespace sax
+};
 
 template<typename T, typename Allocator>
 alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_list<T, Allocator>::global;
