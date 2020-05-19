@@ -456,7 +456,7 @@ class lock_free_plf_list {
         node_ptr node = nullptr;
         unsigned long external_count;
 
-        [[nodiscard]] bool is_anchored ( ) { return node; }
+        [[nodiscard]] bool is_backed ( ) { return node; }
     };
 
     struct node {
@@ -489,20 +489,20 @@ class lock_free_plf_list {
     using nodes_const_iterator = typename nodes_type::const_iterator;
 
     nodes_type nodes;
-    std::atomic<counted_link> anchor;
+    std::atomic<counted_link> back;
 
     public:
     alignas ( 64 ) static spin_rw_lock<long long> output_mutex;
 
     lock_free_plf_list ( ) = default;
 
-    lock_free_plf_list ( value_type const & data_ ) { insert_anchor_implementation ( nodes.emplace ( data_ ) ); }
+    lock_free_plf_list ( value_type const & data_ ) { insert_back_implementation ( nodes.emplace ( data_ ) ); }
     lock_free_plf_list ( value_type && data_ ) {
-        insert_anchor_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+        insert_back_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
     lock_free_plf_list ( Args &&... args_ ) {
-        insert_anchor_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+        insert_back_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
     private:
@@ -511,7 +511,7 @@ class lock_free_plf_list {
         do {
             new_counter = *old_counter_;
             new_counter.external_count += 1;
-        } while ( not dcas ( old_counter_, anchor.load ( std::memory_order_relaxed )->link,
+        } while ( not dcas ( old_counter_, back.load ( std::memory_order_relaxed )->link,
                              new_counter ) ); // not head.compare_exchange_strong ( old_counter_, new_counter,
                                               // std::memory_order_acquire, std::memory_order_relaxed )
         old_counter_->external_count = new_counter.external_count;
@@ -527,57 +527,57 @@ class lock_free_plf_list {
 
     [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
         node_ptr ptr      = &*it_;
-        counted_link link = get_link ( ptr, anchor.load ( std::memory_order_relaxed ) );
-        while ( not dcas ( ( volatile long long * ) link.next, anchor.load ( std::memory_order_relaxed ), link ) )
+        counted_link link = get_link ( ptr, back.load ( std::memory_order_relaxed ) );
+        while ( not dcas ( ( volatile long long * ) link.next, back.load ( std::memory_order_relaxed ), link ) )
             continue;
         ptr->link.next->prev = ( counted_link_ptr ) ( &*it_ );
         return std::forward<nodes_iterator> ( it_ );
     }
 
-    [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_anchor_implementation ( nodes_iterator && it_ ) noexcept {
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_back_implementation ( nodes_iterator && it_ ) noexcept {
         node_ptr new_ = &*it_;
         new_->link    = { ( counted_link_ptr ) new_, ( counted_link_ptr ) new_, new_, 1 };
-        anchor.store ( new_->link, std::memory_order_relaxed );
+        back.store ( new_->link, std::memory_order_relaxed );
         return std::forward<nodes_iterator> ( it_ );
     }
 
     public:
     [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) {
-        if ( HEDLEY_LIKELY ( anchor.load ( std::memory_order_relaxed ).is_anchored ( ) ) )
+        if ( HEDLEY_LIKELY ( back.load ( std::memory_order_relaxed ).is_backed ( ) ) )
             return insert_implementation ( nodes.emplace ( data_ ) );
-        return insert_anchor_implementation ( nodes.emplace ( data_ ) );
+        return insert_back_implementation ( nodes.emplace ( data_ ) );
     }
     [[maybe_unused]] nodes_iterator push ( value_type && data_ ) {
-        if ( HEDLEY_LIKELY ( anchor.load ( std::memory_order_relaxed ).is_anchored ( ) ) )
+        if ( HEDLEY_LIKELY ( back.load ( std::memory_order_relaxed ).is_backed ( ) ) )
             return insert_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
-        return insert_anchor_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+        return insert_back_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
     [[maybe_unused]] nodes_iterator emplace ( Args &&... args_ ) {
-        if ( HEDLEY_LIKELY ( anchor.load ( std::memory_order_relaxed ).is_anchored ( ) ) )
+        if ( HEDLEY_LIKELY ( back.load ( std::memory_order_relaxed ).is_backed ( ) ) )
             return insert_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
-        return insert_anchor_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+        return insert_back_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
-    [[maybe_unused]] nodes_iterator push_anchor ( value_type const & data_ ) {
-        return insert_anchor_implementation ( nodes.emplace ( data_ ) );
+    [[maybe_unused]] nodes_iterator push_back ( value_type const & data_ ) {
+        return insert_back_implementation ( nodes.emplace ( data_ ) );
     }
-    [[maybe_unused]] nodes_iterator push_anchor ( value_type && data_ ) {
-        return insert_anchor_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+    [[maybe_unused]] nodes_iterator push_back ( value_type && data_ ) {
+        return insert_back_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
-    [[maybe_unused]] nodes_iterator emplace_anchor ( Args &&... args_ ) {
-        return insert_anchor_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+    [[maybe_unused]] nodes_iterator emplace_back ( Args &&... args_ ) {
+        return insert_back_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
-    [[maybe_unused]] nodes_iterator push_anchored ( value_type const & data_ ) {
+    [[maybe_unused]] nodes_iterator push_backed ( value_type const & data_ ) {
         return insert_implementation ( nodes.emplace ( data_ ) );
     }
-    [[maybe_unused]] nodes_iterator push_anchored ( value_type && data_ ) {
+    [[maybe_unused]] nodes_iterator push_backed ( value_type && data_ ) {
         return insert_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
-    [[maybe_unused]] nodes_iterator emplace_anchored ( Args &&... args_ ) {
+    [[maybe_unused]] nodes_iterator emplace_backed ( Args &&... args_ ) {
         return insert_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
