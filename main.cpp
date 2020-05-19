@@ -209,8 +209,8 @@ int main ( ) {
     list.emplace ( 0 );
     list.ostream ( std::cout );
 
-    // list.emplace ( 1 );
-    // list.ostream ( std::cout );
+    list.emplace ( 1 );
+    list.ostream ( std::cout );
 
     // list.emplace ( 2 );
     // list.ostream ( std::cout );
