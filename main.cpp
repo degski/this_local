@@ -202,7 +202,27 @@ int main ( ) {
 
     constexpr int N = 4;
 
-    sax::lock_free_plf_list<int> stk;
+    sax::lock_free_plf_list<int> list;
+
+    auto print_list = [ & ] ( ) {
+        for ( auto & n : list )
+            std::cout << n;
+        std::cout << nl;
+    };
+
+    list.emplace ( 0 );
+    print_list ( );
+
+    list.emplace ( 1 );
+    print_list ( );
+
+    list.emplace ( 2 );
+    print_list ( );
+
+    list.emplace ( 3 );
+    print_list ( );
+
+    /*
 
     std::uint64_t duration;
     plf::nanotimer timer;
@@ -221,6 +241,8 @@ int main ( ) {
     for ( auto & n : stk )
         std::cout << n;
     std::cout << nl;
+
+    */
 
     return EXIT_SUCCESS;
 }
