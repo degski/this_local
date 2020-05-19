@@ -522,13 +522,14 @@ class lock_free_plf_list {
         old_counter_->external_count = new_counter.external_count;
     }
 
-    [[nodiscard]] counted_link get_link ( node_ptr new_node_, counted_node_link prev_link_ ) noexcept {
+    [[nodiscard]] HEDLEY_ALWAYS_INLINE counted_link get_link ( node_ptr new_node_,
+                                                               counted_node_link prev_link_ ) noexcept { // has side-effects
         counted_link new_link = { prev_link_.prev, ( counted_link_ptr ) new_node_, prev_link_.external_count };
         new_node_->link       = { ( counted_link_ptr ) prev_link_.node, prev_link_.next, prev_link_.external_count };
         return new_link;
     }
 
-    void back_store ( node_ptr p_ ) noexcept { back.store ( { p_->link, p_ }, std::memory_order_relaxed ); }
+    HEDLEY_ALWAYS_INLINE void back_store ( node_ptr p_ ) noexcept { back.store ( { p_->link, p_ }, std::memory_order_relaxed ); }
 
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
         node_ptr regular  = &*it_;
