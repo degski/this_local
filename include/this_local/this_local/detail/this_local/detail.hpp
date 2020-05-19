@@ -602,28 +602,6 @@ class lock_free_plf_list {
         return ( this->*insert_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
-    [[maybe_unused]] nodes_iterator push_back ( value_type const & data_ ) {
-        return insert_first_implementation ( nodes.emplace ( data_ ) );
-    }
-    [[maybe_unused]] nodes_iterator push_back ( value_type && data_ ) {
-        return insert_first_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
-    }
-    template<typename... Args>
-    [[maybe_unused]] nodes_iterator emplace_back ( Args &&... args_ ) {
-        return insert_first_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
-    }
-
-    [[maybe_unused]] nodes_iterator push_backed ( value_type const & data_ ) {
-        return insert_regular_implementation ( nodes.emplace ( data_ ) );
-    }
-    [[maybe_unused]] nodes_iterator push_backed ( value_type && data_ ) {
-        return insert_regular_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
-    }
-    template<typename... Args>
-    [[maybe_unused]] nodes_iterator emplace_backed ( Args &&... args_ ) {
-        return insert_regular_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
-    }
-
     /*
     void pop ( ) noexcept {
         counted_link old_head = head.load ( std::memory_order_relaxed );
@@ -726,10 +704,16 @@ class lock_free_plf_list {
     [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
 
     template<typename Stream>
-    Stream & stream ( Stream & out_ ) noexcept {
+    Stream & ostream ( Stream & out_ ) noexcept {
         for ( auto & n : nodes )
             out_ << n;
+        out_ << std::endl;
         return out_;
+    }
+
+    template<typename Stream>
+    [[maybe_unused]] friend Stream & operator<< ( Stream & out_, lock_free_plf_list const & list_ ) noexcept {
+        return list_.ostream ( out_ );
     }
 
     static constexpr int offset_data = static_cast<int> ( offsetof ( node, data ) );

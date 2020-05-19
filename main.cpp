@@ -200,21 +200,23 @@ int main5686780 ( ) {
 
 int main ( ) {
 
+    std::ios::sync_with_stdio ( false );
+
     constexpr int N = 4;
 
     sax::lock_free_plf_list<int> list;
 
     list.emplace ( 0 );
-    list.stream ( std::cout );
+    list.ostream ( std::cout );
 
-    list.emplace ( 1 );
-    list.stream ( std::cout );
+    // list.emplace ( 1 );
+    // list.ostream ( std::cout );
 
-    list.emplace ( 2 );
-    list.stream ( std::cout );
+    // list.emplace ( 2 );
+    // list.ostream ( std::cout );
 
-    list.emplace ( 3 );
-    list.stream ( std::cout );
+    // list.emplace ( 3 );
+    // list.ostream ( std::cout );
 
     /*
 
