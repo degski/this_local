@@ -266,7 +266,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         template<typename Stream>
         [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr n_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            std::scoped_lock lock ( lock_free_plf_stack::output_mutex );
+            std::scoped_lock lock ( lock_free_plf_stack::global );
             out_ << '<' << ap ( n_ ) << ' ' << ap ( n_->link.next ) << '>';
             return out_;
         }
@@ -288,7 +288,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     std::atomic<counted_link> head;
 
     public:
-    alignas ( 64 ) static spin_rw_lock<long long> output_mutex;
+    alignas ( 64 ) static spin_rw_lock<long long> global;
 
     private:
     HEDLEY_ALWAYS_INLINE void increase_head_count ( counted_link & old_counter_ ) noexcept {
@@ -301,7 +301,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         old_counter_.external_count = new_counter.external_count;
     }
 
-    [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
         counted_link link = { &*it_, 1 };
         link.next->link   = head.load ( std::memory_order_relaxed );
         while ( not head.compare_exchange_weak ( link.next->link, link, std::memory_order_release, std::memory_order_relaxed ) )
@@ -312,13 +312,15 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     public:
     lock_free_plf_stack ( ) : head{ init_head ( ) } {}
 
-    [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) { return insert_implementation ( nodes.emplace ( data_ ) ); }
+    [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) {
+        return insert_regular_implementation ( nodes.emplace ( data_ ) );
+    }
     [[maybe_unused]] nodes_iterator push ( value_type && data_ ) {
-        return insert_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+        return insert_regular_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
     [[maybe_unused]] nodes_iterator emplace ( Args &&... args_ ) {
-        return insert_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+        return insert_regular_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
     void pop ( ) noexcept {
@@ -431,7 +433,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
 };
 
 template<typename T, typename Allocator>
-alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_stack<T, Allocator>::output_mutex;
+alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_stack<T, Allocator>::global;
 
 template<typename T, typename Allocator = std::allocator<T>>
 class lock_free_plf_list {
@@ -470,7 +472,7 @@ class lock_free_plf_list {
         template<typename Stream>
         [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr n_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            std::scoped_lock lock ( lock_free_plf_list::output_mutex );
+            std::scoped_lock lock ( lock_free_plf_list::global );
             out_ << '<' << ap ( n_->link.node ) << ' ' << ap ( n_->link.prev ) << ' ' << ap ( n_->link.next ) << '>';
             return out_;
         }
@@ -490,19 +492,20 @@ class lock_free_plf_list {
 
     nodes_type nodes;
     std::atomic<counted_link> back;
+    nodes_iterator ( lock_free_plf_list::*insert_implementation ) ( nodes_iterator && ) noexcept; // = &lock_free_plf_list::method;
 
     public:
-    alignas ( 64 ) static spin_rw_lock<long long> output_mutex;
+    alignas ( 64 ) static spin_rw_lock<long long> global;
 
-    lock_free_plf_list ( ) = default;
+    lock_free_plf_list ( ) : insert_implementation{ &lock_free_plf_list::insert_first_implementation } {}
 
-    lock_free_plf_list ( value_type const & data_ ) { insert_back_implementation ( nodes.emplace ( data_ ) ); }
+    lock_free_plf_list ( value_type const & data_ ) { insert_first_implementation ( nodes.emplace ( data_ ) ); }
     lock_free_plf_list ( value_type && data_ ) {
-        insert_back_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+        insert_first_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
     lock_free_plf_list ( Args &&... args_ ) {
-        insert_back_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+        insert_first_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
     private:
@@ -519,66 +522,70 @@ class lock_free_plf_list {
 
     [[nodiscard]] counted_link get_link ( node_ptr new_node_, counted_link prev_link_ ) noexcept {
         counted_link new_link = { prev_link_.prev, ( counted_link_ptr ) new_node_, prev_link_.node, prev_link_.external_count };
-
-        new_node_->link = { ( counted_link_ptr ) prev_link_.node, prev_link_.next, new_node_, prev_link_.external_count };
-
+        new_node_->link       = { ( counted_link_ptr ) prev_link_.node, prev_link_.next, new_node_, prev_link_.external_count };
         return new_link;
     }
 
-    [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_implementation ( nodes_iterator && it_ ) noexcept {
-        node_ptr ptr      = &*it_;
-        counted_link link = get_link ( ptr, back.load ( std::memory_order_relaxed ) );
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
+        node_ptr regular  = &*it_;
+        counted_link link = get_link ( regular, back.load ( std::memory_order_relaxed ) );
         while ( not dcas ( ( volatile long long * ) link.next, back.load ( std::memory_order_relaxed ), link ) )
             continue;
-        ptr->link.next->prev = ( counted_link_ptr ) ( &*it_ );
         return std::forward<nodes_iterator> ( it_ );
     }
 
-    [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_back_implementation ( nodes_iterator && it_ ) noexcept {
-        node_ptr new_ = &*it_;
-        new_->link    = { ( counted_link_ptr ) new_, ( counted_link_ptr ) new_, new_, 1 };
-        back.store ( new_->link, std::memory_order_relaxed );
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_second_implementation ( nodes_iterator && it_ ) noexcept {
+        std::scoped_lock lock ( global );
+        node_ptr second  = &*it_;
+        node_ptr first   = back.load ( std::memory_order_relaxed ).node;
+        second->link     = { ( counted_link_ptr ) first, ( counted_link_ptr ) first, second, 1 };
+        first->link.prev = first->link.next = ( counted_link_ptr ) second;
+        back.store ( second->link, std::memory_order_relaxed );
+        insert_implementation = &lock_free_plf_list::insert_regular_implementation;
+        return std::forward<nodes_iterator> ( it_ );
+    }
+
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_first_implementation ( nodes_iterator && it_ ) noexcept {
+        std::scoped_lock lock ( global );
+        node_ptr first = &*it_;
+        first->link    = { ( counted_link_ptr ) first, ( counted_link_ptr ) first, first, 1 };
+        back.store ( first->link, std::memory_order_relaxed );
+        insert_implementation = &lock_free_plf_list::insert_second_implementation;
         return std::forward<nodes_iterator> ( it_ );
     }
 
     public:
     [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) {
-        if ( HEDLEY_LIKELY ( back.load ( std::memory_order_relaxed ).is_backed ( ) ) )
-            return insert_implementation ( nodes.emplace ( data_ ) );
-        return insert_back_implementation ( nodes.emplace ( data_ ) );
+        return ( this->*insert_implementation ) ( nodes.emplace ( data_ ) );
     }
     [[maybe_unused]] nodes_iterator push ( value_type && data_ ) {
-        if ( HEDLEY_LIKELY ( back.load ( std::memory_order_relaxed ).is_backed ( ) ) )
-            return insert_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
-        return insert_back_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+        return ( this->*insert_implementation ) ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
     [[maybe_unused]] nodes_iterator emplace ( Args &&... args_ ) {
-        if ( HEDLEY_LIKELY ( back.load ( std::memory_order_relaxed ).is_backed ( ) ) )
-            return insert_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
-        return insert_back_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+        return ( this->*insert_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
     [[maybe_unused]] nodes_iterator push_back ( value_type const & data_ ) {
-        return insert_back_implementation ( nodes.emplace ( data_ ) );
+        return insert_first_implementation ( nodes.emplace ( data_ ) );
     }
     [[maybe_unused]] nodes_iterator push_back ( value_type && data_ ) {
-        return insert_back_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+        return insert_first_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
     [[maybe_unused]] nodes_iterator emplace_back ( Args &&... args_ ) {
-        return insert_back_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+        return insert_first_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
     [[maybe_unused]] nodes_iterator push_backed ( value_type const & data_ ) {
-        return insert_implementation ( nodes.emplace ( data_ ) );
+        return insert_regular_implementation ( nodes.emplace ( data_ ) );
     }
     [[maybe_unused]] nodes_iterator push_backed ( value_type && data_ ) {
-        return insert_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+        return insert_regular_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
     [[maybe_unused]] nodes_iterator emplace_backed ( Args &&... args_ ) {
-        return insert_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+        return insert_regular_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
     /*
@@ -681,10 +688,12 @@ class lock_free_plf_list {
     [[nodiscard]] nodes_const_iterator end ( ) const noexcept { return nodes.end ( ); }
     [[nodiscard]] nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
     [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
-}; // namespace sax
+
+    static constexpr int offset_data = static_cast<int> ( offsetof ( node, data ) );
+};
 
 template<typename T, typename Allocator>
-alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_list<T, Allocator>::output_mutex;
+alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_list<T, Allocator>::global;
 
 #undef ever
 
