@@ -517,8 +517,10 @@ class lock_free_plf_list {
     std::atomic<counted_node_link> back;
     nodes_iterator ( lock_free_plf_list::*insert_implementation ) ( nodes_iterator && ) noexcept;
 
-    counted_link & cl_ref ( node_ptr & ptr_ ) noexcept { return *reinterpret_cast<counted_link_ptr> ( &ptr_ ); }
-    counted_link const & cl_ref ( node_ptr const & ptr_ ) const noexcept { return *reinterpret_cast<counted_link_ptr> ( &ptr_ ); }
+    counted_link & counted_link ( node_ptr & ptr_ ) noexcept { return *reinterpret_cast<counted_link_ptr> ( &ptr_ ); }
+    counted_link const & counted_link ( node_ptr const & ptr_ ) const noexcept {
+        return *reinterpret_cast<counted_link_ptr> ( &ptr_ );
+    }
 
     public:
     alignas ( 64 ) static spin_rw_lock<long long> global;
@@ -548,13 +550,13 @@ class lock_free_plf_list {
 
     [[nodiscard]] HEDLEY_ALWAYS_INLINE counted_link get_link ( node_ptr new_node_,
                                                                counted_node_link prev_link_ ) noexcept { // has side-effects
-        counted_link new_link = { prev_link_.prev, ( counted_link_ptr ) new_node_, prev_link_.external_count };
-        cl_ref ( new_node_ )  = { ( counted_link_ptr ) prev_link_.node, prev_link_.next, prev_link_.external_count };
+        counted_link new_link      = { prev_link_.prev, ( counted_link_ptr ) new_node_, prev_link_.external_count };
+        counted_link ( new_node_ ) = { ( counted_link_ptr ) prev_link_.node, prev_link_.next, prev_link_.external_count };
         return new_link;
     }
 
     HEDLEY_ALWAYS_INLINE void back_store ( node_ptr p_ ) noexcept {
-        back.store ( { cl_ref ( p_ ), p_ }, std::memory_order_relaxed );
+        back.store ( { counted_link ( p_ ), p_ }, std::memory_order_relaxed );
     }
 
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
@@ -569,10 +571,10 @@ class lock_free_plf_list {
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_second_implementation ( nodes_iterator && it_ ) noexcept {
         auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
         std::scoped_lock lock ( global );
-        node_ptr second            = &*it_;
-        counted_node_link first    = back.load ( std::memory_order_relaxed );
-        cl_ref ( second )          = { ( counted_link_ptr ) first.node, ( counted_link_ptr ) first.node, 1 };
-        cl_ref ( first.node ).prev = cl_ref ( first.node ).next = ( counted_link_ptr ) second;
+        node_ptr second                  = &*it_;
+        counted_node_link first          = back.load ( std::memory_order_relaxed );
+        counted_link ( second )          = { ( counted_link_ptr ) first.node, ( counted_link_ptr ) first.node, 1 };
+        counted_link ( first.node ).prev = counted_link ( first.node ).next = ( counted_link_ptr ) second;
         back_store ( second );
         insert_implementation = &lock_free_plf_list::insert_regular_implementation;
         return std::forward<nodes_iterator> ( it_ );
@@ -580,8 +582,8 @@ class lock_free_plf_list {
 
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_first_implementation ( nodes_iterator && it_ ) noexcept {
         std::scoped_lock lock ( global );
-        node_ptr first   = &*it_;
-        cl_ref ( first ) = { ( counted_link_ptr ) first, ( counted_link_ptr ) first, 1 };
+        node_ptr first         = &*it_;
+        counted_link ( first ) = { ( counted_link_ptr ) first, ( counted_link_ptr ) first, 1 };
         back_store ( first );
         insert_implementation = &lock_free_plf_list::insert_second_implementation;
         return std::forward<nodes_iterator> ( it_ );
