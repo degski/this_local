@@ -523,6 +523,7 @@ class lock_free_plf_list {
     }
 
     public:
+    spin_rw_lock<char> instance;
     alignas ( 64 ) static spin_rw_lock<long long> global;
 
     lock_free_plf_list ( ) : insert_implementation{ &lock_free_plf_list::insert_first_implementation } {}
@@ -570,7 +571,7 @@ class lock_free_plf_list {
 
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_second_implementation ( nodes_iterator && it_ ) noexcept {
         auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
-        std::scoped_lock lock ( global );
+        std::scoped_lock lock ( instance );
         node_ptr second                      = &*it_;
         counted_node_link first              = back.load ( std::memory_order_relaxed );
         counted_link_ref ( second )          = { ( counted_link_ptr ) first.node, ( counted_link_ptr ) first.node, 1 };
@@ -581,7 +582,7 @@ class lock_free_plf_list {
     }
 
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_first_implementation ( nodes_iterator && it_ ) noexcept {
-        std::scoped_lock lock ( global );
+        std::scoped_lock lock ( instance );
         node_ptr first             = &*it_;
         counted_link_ref ( first ) = { ( counted_link_ptr ) first, ( counted_link_ptr ) first, 1 };
         back_store ( first );
