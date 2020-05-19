@@ -200,7 +200,7 @@ int main5686780 ( ) {
 
 int main ( ) {
 
-    constexpr int N = 2;
+    constexpr int N = 4;
 
     sax::lock_free_plf_list<int> stk;
 

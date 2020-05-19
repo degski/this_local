@@ -88,8 +88,8 @@ HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
 #endif
 }
 
-template<typename T>
-[[nodiscard]] inline bool dcas ( volatile long long * destination_, T result_, T exchange_ ) noexcept {
+template<typename T, typename U>
+[[nodiscard]] inline bool dcas ( volatile long long * destination_, T result_, U exchange_ ) noexcept {
 
     struct alignas ( 16 ) uint128_t {
         long long lo;
@@ -516,7 +516,7 @@ class lock_free_plf_list {
         do {
             new_counter = *old_counter_;
             new_counter.external_count += 1;
-        } while ( not dcas ( old_counter_, back.load ( std::memory_order_relaxed )->link,
+        } while ( not dcas ( old_counter_, back.load ( std::memory_order_relaxed ),
                              new_counter ) ); // not head.compare_exchange_strong ( old_counter_, new_counter,
                                               // std::memory_order_acquire, std::memory_order_relaxed )
         old_counter_->external_count = new_counter.external_count;
@@ -534,7 +534,7 @@ class lock_free_plf_list {
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
         node_ptr regular  = &*it_;
         counted_link link = get_link ( regular, back.load ( std::memory_order_relaxed ) );
-        while ( not dcas ( ( volatile long long * ) link.next, ( counted_link ) back.load ( std::memory_order_relaxed ), link ) )
+        while ( not dcas ( ( volatile long long * ) link.next, back.load ( std::memory_order_relaxed ), link ) )
             yield ( );
         back_store ( regular );
         return std::forward<nodes_iterator> ( it_ );
