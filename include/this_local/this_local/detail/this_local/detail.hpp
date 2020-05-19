@@ -70,6 +70,8 @@
 #include <type_traits>
 #include <utility>
 
+#include <sax/iostream.hpp>
+
 #include "../../../this_local/hedley.h"
 
 #include "../../../this_local/plf_colony.h"
@@ -264,15 +266,15 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         node ( Args &&... args_ ) : internal_count{ 0 }, data{ std::forward<Args> ( args_ )... } {}
 
         template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr n_ ) noexcept {
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
             std::scoped_lock lock ( lock_free_plf_stack::global );
-            out_ << '<' << ap ( n_ ) << ' ' << ap ( n_->link.next ) << '>';
+            out_ << '<' << ap ( link_ ) << ' ' << ap ( link_->link.next ) << '>';
             return out_;
         }
         template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const & n_ ) noexcept {
-            return operator<< ( out_, &n_ );
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const & link_ ) noexcept {
+            return operator<< ( out_, &link_ );
         }
 
         value_type data;
@@ -456,11 +458,27 @@ class lock_free_plf_list {
 
         alignas ( 16 ) counted_link_ptr prev, next;
         unsigned long external_count;
+
+        template<typename Stream>
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, counted_link const & link_ ) noexcept {
+            auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
+            std::scoped_lock lock ( lock_free_plf_list::global );
+            out_ << '<' << ap ( link_.prev ) << ' ' << ap ( link_.next ) << '>';
+            return out_;
+        }
     };
 
     struct counted_node_link : public counted_link {
 
         node_ptr node = nullptr;
+
+        template<typename Stream>
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, counted_node_link const & link_ ) noexcept {
+            auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
+            std::scoped_lock lock ( lock_free_plf_list::global );
+            out_ << '<' << ap ( link_.node ) << ' ' << ap ( link_.prev ) << ' ' << ap ( link_.next ) << '>';
+            return out_;
+        }
     };
 
     struct node {
@@ -472,15 +490,15 @@ class lock_free_plf_list {
         node ( Args &&... args_ ) : data{ std::forward<Args> ( args_ )... } {}
 
         template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr n_ ) noexcept {
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
             std::scoped_lock lock ( lock_free_plf_list::global );
-            out_ << '<' << ap ( &n_->link ) << ' ' << ap ( n_->link.prev ) << ' ' << ap ( n_->link.next ) << '>';
+            out_ << '<' << ap ( &link_->link ) << ' ' << ap ( link_->link.prev ) << ' ' << ap ( link_->link.next ) << '>';
             return out_;
         }
         template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const & n_ ) noexcept {
-            return operator<< ( out_, &n_ );
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const & link_ ) noexcept {
+            return operator<< ( out_, &link_ );
         }
 
         value_type data;
@@ -541,6 +559,7 @@ class lock_free_plf_list {
     }
 
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_second_implementation ( nodes_iterator && it_ ) noexcept {
+        auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
         std::scoped_lock lock ( global );
         node_ptr second         = &*it_;
         counted_node_link first = back.load ( std::memory_order_relaxed );
