@@ -695,6 +695,13 @@ class lock_free_plf_list {
     [[nodiscard]] nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
     [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
 
+    template<typename Stream>
+    Stream & stream ( Stream & out_ ) noexcept {
+        for ( auto & n : nodes )
+            out_ << n;
+        return out_;
+    }
+
     static constexpr int offset_data = static_cast<int> ( offsetof ( node, data ) );
 }; // namespace sax
 

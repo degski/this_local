@@ -204,23 +204,17 @@ int main ( ) {
 
     sax::lock_free_plf_list<int> list;
 
-    auto print_list = [ & ] ( ) {
-        for ( auto & n : list )
-            std::cout << n;
-        std::cout << nl;
-    };
-
     list.emplace ( 0 );
-    print_list ( );
+    list.stream ( std::cout );
 
     list.emplace ( 1 );
-    print_list ( );
+    list.stream ( std::cout );
 
     list.emplace ( 2 );
-    print_list ( );
+    list.stream ( std::cout );
 
     list.emplace ( 3 );
-    print_list ( );
+    list.stream ( std::cout );
 
     /*
 
