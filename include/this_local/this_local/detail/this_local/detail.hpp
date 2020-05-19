@@ -534,7 +534,7 @@ class lock_free_plf_list {
         node_ptr regular  = &*it_;
         counted_link link = get_link ( regular, back.load ( std::memory_order_relaxed ) );
         while ( not dcas ( ( volatile long long * ) link.next, ( counted_link ) back.load ( std::memory_order_relaxed ), link ) )
-            continue;
+            yield ( );
         back_store ( regular );
         return std::forward<nodes_iterator> ( it_ );
     }
