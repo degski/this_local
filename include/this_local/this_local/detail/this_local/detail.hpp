@@ -75,7 +75,7 @@
 #include "../../../this_local/hedley.h"
 
 #include "../../../this_local/plf_colony.h"
-#include "../../../this_local/plf_list.h" // a queue
+#include "../../../this_local/plf_list.h"
 #include "../../../this_local/plf_stack.h"
 
 namespace sax {
@@ -579,13 +579,15 @@ class lock_free_plf_list {
         return new_link;
     }
 
-    HEDLEY_ALWAYS_INLINE void back_store ( node_ptr p_ ) noexcept {
-        back.store ( { ( ( counted_link ) *p_ ), p_ }, std::memory_order_relaxed );
+    HEDLEY_ALWAYS_INLINE void counted_back_store ( node_ptr p_, counted_link l_, char c_ = 0 ) noexcept {
+        std::memcpy ( reinterpret_cast<char *> ( &p_ ) + 7, &c_, 1 ); // little-endian?
+        back.store ( { std::forward<counted_link> ( l_ ), std::forward<node_ptr> ( p_ ) }, std::memory_order_relaxed );
     }
 
-    [[nodiscard]] node_ptr get_old_node ( ) const noexcept {
-        counted_node_link b = back.load ( std::memory_order_relaxed );
-        return b.node;
+    HEDLEY_ALWAYS_INLINE std::tuple<counted_link, node_ptr, char> counted_back_load ( node_ptr p_ ) noexcept {
+        counted_node_link cnl = back.load ( std::memory_order_relaxed );
+        char c                = std::exchange ( reinterpret_cast<char *> ( &cnl.node ) + 7, 0 );
+        return { std::forward<counted_link> ( counted_link::cnl ), std::forward<node_ptr> ( cnl.node ), std::forward<char> ( c ) };
     }
 
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
@@ -593,12 +595,11 @@ class lock_free_plf_list {
         node_ptr new_node = &*it_;
 
         do {
-            node_ptr old_node = get_old_node ( );
-            // set new nodes' counted_link to old nodes' counted_link
-            *( ( counted_link * ) new_node ) = *( ( counted_link * ) old_node );
+            node_ptr old_node                = load_old_node ( );
+            *( ( counted_link * ) new_node ) = { old_node, old_node->next };
+            counted_link new_link_old_node   = { old_node->prev, new_node };
 
-        } while ( not dwcas ( *( ( counted_link * ) old_node ), back.load ( std::memory_order_relaxed ),
-                              *( ( counted_link * ) new_node ) ) );
+        } while ( not dwcas ( *( ( counted_link * ) old_node ), new_link_old_node, *( ( counted_link * ) new_node ) ) );
 
         back_store ( regular );
         new_node->next->prev = regular;
@@ -753,7 +754,7 @@ class lock_free_plf_list {
     }
 
     static constexpr int offset_data = static_cast<int> ( offsetof ( node, data ) );
-};
+}; // namespace sax
 
 template<typename Stream>
 [[maybe_unused]] Stream & operator<< ( Stream & out_, uint128_t const & i_ ) noexcept {
