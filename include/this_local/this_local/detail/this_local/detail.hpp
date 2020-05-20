@@ -253,6 +253,11 @@ struct slim_rw_lock final {
     ;                                                                                                                              \
     ;
 
+namespace at {
+struct back {};
+struct front {};
+}; // namespace at
+
 template<typename T, typename Allocator = std::allocator<T>>
 class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed., Listing 7.13 - Anthony Williams
 
@@ -542,6 +547,7 @@ class lock_free_plf_list {
 
     nodes_type nodes;
     std::atomic<counted_node_link> back;
+
     nodes_iterator ( lock_free_plf_list::*insert_implementation ) ( nodes_iterator && ) noexcept;
 
     public:
@@ -570,52 +576,54 @@ class lock_free_plf_list {
         old_counter_->external_count = new_counter.external_count;
     }
 
-    HEDLEY_ALWAYS_INLINE void counted_back_store ( node_ptr p_, counted_link l_, char aba_id_ = 0 ) noexcept {
+    HEDLEY_ALWAYS_INLINE void counted_back_store ( node_ptr p_, counted_link l_, unsigned char aba_id_ = 0 ) noexcept {
         std::memcpy ( reinterpret_cast<char *> ( &p_ ) + 7, &aba_id_, 1 ); // little-endian?
         back.store ( { std::forward<counted_link> ( l_ ), std::forward<node_ptr> ( p_ ) }, std::memory_order_relaxed );
     }
 
+    template<typename At>
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
-
-        node_ptr new_node = &*it_;
-
-        counted_node_link old = back.load ( std::memory_order_relaxed );
-        char new_aba_id       = std::exchange ( *( reinterpret_cast<char> ( &old.node ) + 7 ), 0 )++;
-
-        *( ( counted_link * ) new_node ) = { old.node, old.node->next };
-        counted_back_store ( new_node, { old.node->prev, new_node }, new_aba_id );
-
-        while ( not dwcas ( *( ( counted_link * ) old_node ), back.load ( std::memory_order_relaxed ),
-                            *( ( counted_link * ) new_node ) ) ) {
+        node_ptr new_node       = &*it_;
+        counted_node_link old   = back.load ( std::memory_order_relaxed );
+        unsigned char new_aba   = std::exchange ( *( reinterpret_cast<char *> ( &old.node ) + 7 ), 0 )++;
+        *counted_link::new_node = { old.node, old.node->next };
+        counted_back_store ( new_node, { old.node->prev, new_node }, new_aba );
+        while ( not dwcas ( *counted_link::old.node, back.load ( std::memory_order_relaxed ), *counted_link::new_node ) ) {
             old = back.load ( std::memory_order_relaxed );
-            std::memset ( reinterpret_cast<char> ( &old.node ) + 7 ) , 0, 1 )
-            *( ( counted_link * ) new_node ) = { old.node, old.node->next };
-            counted_back_store ( new_node, { old.node->prev, new_node }, new_aba_id );
+            std::memset ( reinterpret_cast<char *> ( &old.node ) + 7, 0, 1 );
+            *counted_link::new_node = { old.node, old.node->next };
+            if constexpr ( std::is_same<at::back, At>::value )
+                counted_back_store ( new_node, { old.node->prev, new_node }, new_aba );
+            else
+                counted_back_store ( old.node, { old.node->prev, new_node }, new_aba );
         }
-
-        back_store ( regular );
-        new_node->next->prev = regular;
+        new_node->next->prev = new_node;
         return std::forward<nodes_iterator> ( it_ );
     }
 
+    template<typename At>
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_second_implementation ( nodes_iterator && it_ ) noexcept {
         auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
         std::scoped_lock lock ( instance );
-        node_ptr second                         = &*it_;
-        counted_node_link first                 = back.load ( std::memory_order_relaxed );
-        ( ( counted_link & ) *second )          = { ( counted_link_ptr ) first.node, ( counted_link_ptr ) first.node, 1 };
-        ( ( counted_link & ) *first.node ).prev = ( ( counted_link & ) *first.node ).next = ( counted_link_ptr ) second;
-        back_store ( second );
-        insert_implementation = &lock_free_plf_list::insert_regular_implementation;
+        node_ptr second                = &*it_;
+        counted_node_link first        = back.load ( std::memory_order_relaxed );
+        *counted_link::second          = { counted_link::first.node, counted_link::first.node, 1 };
+        *counted_link::first.node.prev = *counted_link::first.node.next = second;
+        if constexpr ( std::is_same<at::back, At>::value )
+            counted_back_store ( second, { first.node, first.node }, 1 );
+        else
+            counted_back_store ( first, { first.node, first.node }, 1 );
+        insert_implementation = &lock_free_plf_list::insert_regular_implementation<At>;
         return std::forward<nodes_iterator> ( it_ );
     }
 
+    template<typename At>
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_first_implementation ( nodes_iterator && it_ ) noexcept {
         std::scoped_lock lock ( instance );
-        node_ptr first                = &*it_;
-        ( ( counted_link & ) *first ) = { ( counted_link_ptr ) first, ( counted_link_ptr ) first, 1 };
-        back_store ( first );
-        insert_implementation = &lock_free_plf_list::insert_second_implementation;
+        node_ptr first       = &*it_;
+        *counted_link::first = { ( counted_link_ptr ) first, ( counted_link_ptr ) first, 1 };
+        counted_back_store ( first, { first, first }, 1 );
+        insert_implementation = &lock_free_plf_list::insert_second_implementation<At>;
         return std::forward<nodes_iterator> ( it_ );
     }
 
