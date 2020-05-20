@@ -589,60 +589,12 @@ class lock_free_plf_list final {
         return ( this->*insert_front_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
-    class alignas ( 16 ) const_iterator final {
-
-        friend class lock_free_plf_list;
-
-        const_node_ptr node, end_node;
-        long long skip_end; // will throw on (negative-) overflow, not handled
-
-        const_iterator ( const_node_ptr node_, const_node_ptr end_node_, long long end_passes_ ) noexcept :
-            node{ std::forward<const_node_ptr> ( node_ ) }, end_node{ std::forward<const_node_ptr> ( end_node_ ) }, skip_end{
-                std::forward<long long> ( end_passes_ )
-            } {}
-
-        public:
-        using iterator_category = std::bidirectional_iterator_tag;
-
-        const_iterator ( const_iterator && ) noexcept      = default;
-        const_iterator ( const_iterator const & ) noexcept = default;
-
-        [[maybe_unused]] const_iterator & operator= ( const_iterator && ) noexcept = default;
-        [[maybe_unused]] const_iterator & operator= ( const_iterator const & ) noexcept = default;
-
-        ~const_iterator ( ) = default;
-
-        [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
-            node = node->next;
-            if ( node == end_node and skip_end ) {
-                node = node->next;
-                skip_end -= 1;
-            }
-            return *this;
-        }
-        [[maybe_unused]] const_iterator & operator-- ( ) noexcept {
-            node = node->prev;
-            if ( node == end_node and skip_end ) {
-                node = node->prev;
-                skip_end -= 1;
-            }
-            return *this;
-        }
-
-        [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept { return node == r_.node; }
-        [[nodiscard]] bool operator!= ( const_iterator const & r_ ) const noexcept { return node != r_.node; }
-        [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
-        [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
-    };
-
     class alignas ( 16 ) iterator final {
 
         friend class lock_free_plf_list;
 
         node_ptr node, end_node;
         long long skip_end; // will throw on (negative-) overflow, not handled
-
-        iterator ( const_iterator it_ ) noexcept : node{ const_cast<node_ptr> ( std::forward<const_node_ptr> ( it_.node ) ) } {}
 
         iterator ( node_ptr node_, node_ptr end_node_, long long end_passes_ ) noexcept :
             node{ std::forward<node_ptr> ( node_ ) }, end_node{ std::forward<node_ptr> ( end_node_ ) }, skip_end{
@@ -654,10 +606,6 @@ class lock_free_plf_list final {
 
         iterator ( iterator && ) noexcept      = default;
         iterator ( iterator const & ) noexcept = default;
-        iterator ( const_iterator const & o_ ) noexcept :
-            node{ const_cast<node_ptr> ( o_.node ) }, end_node{ const_cast<node_ptr> ( o_.end_node ) }, skip_end{
-                const_cast<long long> ( o_.skip_end )
-            } {}
 
         [[maybe_unused]] iterator & operator= ( iterator && ) noexcept = default;
         [[maybe_unused]] iterator & operator= ( iterator const & ) noexcept = default;
@@ -683,6 +631,53 @@ class lock_free_plf_list final {
 
         [[nodiscard]] bool operator== ( iterator const & r_ ) const noexcept { return node == r_.node; }
         [[nodiscard]] bool operator!= ( iterator const & r_ ) const noexcept { return node != r_.node; }
+        [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
+        [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
+    };
+
+    class alignas ( 16 ) const_iterator final {
+
+        friend class lock_free_plf_list;
+
+        const_node_ptr node, end_node;
+        long long skip_end; // will throw on (negative-) overflow, not handled
+
+        const_iterator ( const_node_ptr node_, const_node_ptr end_node_, long long end_passes_ ) noexcept :
+            node{ std::forward<const_node_ptr> ( node_ ) }, end_node{ std::forward<const_node_ptr> ( end_node_ ) }, skip_end{
+                std::forward<long long> ( end_passes_ )
+            } {}
+
+        public:
+        using iterator_category = std::bidirectional_iterator_tag;
+
+        const_iterator ( const_iterator && ) noexcept      = default;
+        const_iterator ( const_iterator const & ) noexcept = default;
+        const_iterator ( iterator const & o_ ) noexcept : node{ o_.node }, end_node{ o_.end_node }, skip_end{ o_.skip_end } {}
+
+        [[maybe_unused]] const_iterator & operator= ( const_iterator && ) noexcept = default;
+        [[maybe_unused]] const_iterator & operator= ( const_iterator const & ) noexcept = default;
+
+        ~const_iterator ( ) = default;
+
+        [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
+            node = node->next;
+            if ( node == end_node and skip_end ) {
+                node = node->next;
+                skip_end -= 1;
+            }
+            return *this;
+        }
+        [[maybe_unused]] const_iterator & operator-- ( ) noexcept {
+            node = node->prev;
+            if ( node == end_node and skip_end ) {
+                node = node->prev;
+                skip_end -= 1;
+            }
+            return *this;
+        }
+
+        [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept { return node == r_.node; }
+        [[nodiscard]] bool operator!= ( const_iterator const & r_ ) const noexcept { return node != r_.node; }
         [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
         [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
     };
