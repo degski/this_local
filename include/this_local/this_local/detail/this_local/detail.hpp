@@ -126,9 +126,9 @@ struct alignas ( 16 ) uint128_t {
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m64 ( void const * const a_, void const * const b_ ) noexcept {
     std::uint64_t a;
-    std::memcpy ( &a, a_, sizeof ( a ) );
+    std::memcpy ( &a, a_, 8 );
     std::uint64_t b;
-    std::memcpy ( &b, b_, sizeof ( b ) );
+    std::memcpy ( &b, b_, 8 );
     return a == b;
 }
 
@@ -143,9 +143,6 @@ struct alignas ( 16 ) uint128_t {
 // operation fails, researchers have found that total system performance can be improved in multiprocessor systems—where many
 // threads constantly update some particular shared variable if threads that see their CAS fail use exponential backoff, in
 // other words, wait a little before retrying the CAS.
-
-// while ( not dwcas ( link.next, back.load ( std::memory_order_relaxed ), link ) )
-//     yield ( );
 
 template<typename MutexType>
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool soft_dwcas ( sax::uint128_t & dest_, sax::uint128_t ex_new_,
@@ -597,7 +594,7 @@ class lock_free_plf_list {
 
         do {
             node_ptr old_node = get_old_node ( );
-            // set new nodes' counted_link to old nodes' counted link
+            // set new nodes' counted_link to old nodes' counted_link
             *( ( counted_link * ) new_node ) = *( ( counted_link * ) old_node );
 
         } while ( not dwcas ( *( ( counted_link * ) old_node ), back.load ( std::memory_order_relaxed ),
