@@ -544,29 +544,18 @@ class lock_free_plf_list final {
     }
 
     template<typename At>
-    [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_second_implementation ( nodes_iterator && it_ ) noexcept {
-        auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
-        std::scoped_lock lock ( instance );
-        node_ptr second                = &*it_;
-        counted_node_link first        = sentinel.load ( std::memory_order_relaxed );
-        *counted_link::second          = { counted_link::first.node, counted_link::first.node, 1 };
-        *counted_link::first.node.prev = *counted_link::first.node.next = second;
+    [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_first_implementation ( nodes_iterator && it_ ) noexcept {
+        node_ptr new_node    = &*it_;
+        *counted_link::first = { ( counted_link_ptr ) &end_link, ( counted_link_ptr ) &end_link, 1 };
+        end_link.prev = end_link.next = first;
         if constexpr ( std::is_same<at::front, At>::value ) {
-            store_sentinel ( first, { first.node, first.node }, 1 );
+            store_sentinel ( &end_link, { ( counted_link_ptr ) &end_link, ( counted_link_ptr ) &end_link }, 1 );
             insert_front_implementation = &lock_free_plf_list::insert_regular_implementation<at::front>;
         }
         else {
-            store_sentinel ( second, { first.node, first.node }, 1 );
+            store_sentinel ( new_node, { ( counted_link_ptr ) &end_link, ( counted_link_ptr ) &end_link }, 1 );
             insert_back_implementation = &lock_free_plf_list::insert_regular_implementation<at::back>;
         }
-        return std::forward<nodes_iterator> ( it_ );
-    }
-
-    [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_end_implementation ( nodes_iterator && it_ ) noexcept {
-        *counted_link::first = { ( counted_link_ptr ) first, ( counted_link_ptr ) first, 1 };
-        store_sentinel ( first, { first, first }, 1 );
-        insert_front_implementation = &lock_free_plf_list::insert_second_implementation<at::front>;
-        insert_back_implementation  = &lock_free_plf_list::insert_second_implementation<at::back>;
         return std::forward<nodes_iterator> ( it_ );
     }
 
