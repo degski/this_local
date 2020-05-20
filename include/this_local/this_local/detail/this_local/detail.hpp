@@ -418,7 +418,7 @@ class lock_free_plf_list final {
     using counted_link_ptr       = counted_link *;
     using const_counted_link_ptr = counted_link const *;
 
-    struct node : counted_link final {
+    struct node final : counted_link {
 
         std::atomic<unsigned long> internal_count = { 0 };
 
@@ -448,7 +448,7 @@ class lock_free_plf_list final {
         char _[ sizeof ( node ) ];
     };
 
-    struct counted_node_link : public counted_link final {
+    struct counted_node_link final : public counted_link {
 
         node_ptr node = nullptr;
 
@@ -493,17 +493,17 @@ class lock_free_plf_list final {
 
     public:
     lock_free_plf_list ( ) :
-        insert_front_implementation{ &lock_free_plf_list::insert_first_implementation }, insert_back_implementation{
-            &lock_free_plf_list::insert_first_implementation
+        insert_front_implementation{ &lock_free_plf_list::insert_init_implementation }, insert_back_implementation{
+            &lock_free_plf_list::insert_init_implementation
         } {}
 
-    lock_free_plf_list ( value_type const & data_ ) { insert_first_implementation ( nodes.emplace ( data_ ) ); }
+    lock_free_plf_list ( value_type const & data_ ) { insert_init_implementation ( nodes.emplace ( data_ ) ); }
     lock_free_plf_list ( value_type && data_ ) {
-        insert_first_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+        insert_init_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
     lock_free_plf_list ( Args &&... args_ ) {
-        insert_first_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+        insert_init_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
     private:
@@ -544,10 +544,10 @@ class lock_free_plf_list final {
     }
 
     template<typename At>
-    [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_first_implementation ( nodes_iterator && it_ ) noexcept {
+    [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_init_implementation ( nodes_iterator && it_ ) noexcept {
         node_ptr new_node    = &*it_;
         *counted_link::first = { ( counted_link_ptr ) &end_link, ( counted_link_ptr ) &end_link, 1 };
-        end_link.prev = end_link.next = first;
+        end_link.prev = end_link.next = new_node;
         if constexpr ( std::is_same<at::front, At>::value ) {
             store_sentinel ( &end_link, { ( counted_link_ptr ) &end_link, ( counted_link_ptr ) &end_link }, 1 );
             insert_front_implementation = &lock_free_plf_list::insert_regular_implementation<at::front>;
@@ -589,20 +589,20 @@ class lock_free_plf_list final {
         return ( this->*insert_front_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
-    class alignas ( 64 ) const_iterator final {
+    class alignas ( 16 ) const_iterator final {
 
         friend class lock_free_plf_list;
 
         const_node_ptr node, end_node;
         long long skip_end; // will throw on (negative-) overflow, not handled
 
-        public:
-        using iterator_category = std::bidirectional_iterator_tag;
-
         const_iterator ( const_node_ptr node_, const_node_ptr end_node_, long long end_passes_ ) noexcept :
             node{ std::forward<const_node_ptr> ( node_ ) }, end_node{ std::forward<const_node_ptr> ( end_node_ ) }, skip_end{
                 std::forward<long long> ( end_passes_ )
             } {}
+
+        public:
+        using iterator_category = std::bidirectional_iterator_tag;
 
         const_iterator ( const_iterator && ) noexcept      = default;
         const_iterator ( const_iterator const & ) noexcept = default;
@@ -635,23 +635,29 @@ class lock_free_plf_list final {
         [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
     };
 
-    class alignas ( 64 ) iterator final {
+    class alignas ( 16 ) iterator final {
 
         friend class lock_free_plf_list;
 
         node_ptr node, end_node;
         long long skip_end; // will throw on (negative-) overflow, not handled
 
-        public:
-        using iterator_category = std::bidirectional_iterator_tag;
+        iterator ( const_iterator it_ ) noexcept : node{ const_cast<node_ptr> ( std::forward<const_node_ptr> ( it_.node ) ) } {}
 
         iterator ( node_ptr node_, node_ptr end_node_, long long end_passes_ ) noexcept :
             node{ std::forward<node_ptr> ( node_ ) }, end_node{ std::forward<node_ptr> ( end_node_ ) }, skip_end{
                 std::forward<long long> ( end_passes_ )
             } {}
 
+        public:
+        using iterator_category = std::bidirectional_iterator_tag;
+
         iterator ( iterator && ) noexcept      = default;
         iterator ( iterator const & ) noexcept = default;
+        iterator ( const_iterator const & o_ ) noexcept :
+            node{ const_cast<node_ptr> ( o_.node ) }, end_node{ const_cast<node_ptr> ( o_.end_node ) }, skip_end{
+                const_cast<long long> ( o_.skip_end )
+            } {}
 
         [[maybe_unused]] iterator & operator= ( iterator && ) noexcept = default;
         [[maybe_unused]] iterator & operator= ( iterator const & ) noexcept = default;
