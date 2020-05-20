@@ -392,7 +392,7 @@ alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_stack<T, Allocator>::global
 alignas ( 64 ) inline static spin_rw_lock<long long> global_mutex;
 
 template<typename T, typename Allocator = std::allocator<T>>
-class lock_free_plf_list {
+class lock_free_plf_list final {
 
     public:
     using value_type      = T;
@@ -418,7 +418,7 @@ class lock_free_plf_list {
     using counted_link_ptr       = counted_link *;
     using const_counted_link_ptr = counted_link const *;
 
-    struct node : counted_link {
+    struct node : counted_link final {
 
         std::atomic<unsigned long> internal_count = { 0 };
 
@@ -448,7 +448,7 @@ class lock_free_plf_list {
         char _[ sizeof ( node ) ];
     };
 
-    struct counted_node_link : public counted_link {
+    struct counted_node_link : public counted_link final {
 
         node_ptr node = nullptr;
 
@@ -478,12 +478,13 @@ class lock_free_plf_list {
 
     // class variables
 
-    alignas ( 64 ) std::atomic<counted_node_link> sentinel; // the work-horse
-
     public:
     alignas ( 64 ) spin_rw_lock<long long> instance;
 
     private:
+    alignas ( 64 ) std::atomic<counted_node_link> sentinel; // the work-horse
+    counted_link end_link;
+
     nodes_type nodes;
     nodes_iterator ( lock_free_plf_list::*insert_front_implementation ) ( nodes_iterator && ) noexcept;
     nodes_iterator ( lock_free_plf_list::*insert_back_implementation ) ( nodes_iterator && ) noexcept;
@@ -561,9 +562,7 @@ class lock_free_plf_list {
         return std::forward<nodes_iterator> ( it_ );
     }
 
-    [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_first_implementation ( nodes_iterator && it_ ) noexcept {
-        std::scoped_lock lock ( instance );
-        node_ptr first       = &*it_;
+    [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_end_implementation ( nodes_iterator && it_ ) noexcept {
         *counted_link::first = { ( counted_link_ptr ) first, ( counted_link_ptr ) first, 1 };
         store_sentinel ( first, { first, first }, 1 );
         insert_front_implementation = &lock_free_plf_list::insert_second_implementation<at::front>;
@@ -601,19 +600,72 @@ class lock_free_plf_list {
         return ( this->*insert_front_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
-    class iterator {
+    class alignas ( 64 ) const_iterator final {
+
         friend class lock_free_plf_list;
 
-        node_ptr node;
+        const_node_ptr node, end_node;
+        long long skip_end; // will throw on (negative-) overflow, not handled
 
         public:
         using iterator_category = std::bidirectional_iterator_tag;
 
-        //   iterator ( const_iterator it_ ) noexcept : node{ const_cast<node_ptr> ( std::forward<const_node_ptr> ( it_.node ) ) }
-        //   {}
-        iterator ( node_ptr node_ ) noexcept : node{ std::forward<node_ptr> ( node_ ) } {}
-        iterator ( iterator && it_ ) noexcept : node{ std::forward<node_ptr> ( it_.node ) } {}
-        iterator ( iterator const & it_ ) noexcept : node{ it_.node } {}
+        const_iterator ( const_node_ptr node_, const_node_ptr end_node_, long long end_passes_ ) noexcept :
+            node{ std::forward<const_node_ptr> ( node_ ) }, end_node{ std::forward<const_node_ptr> ( end_node_ ) }, skip_end{
+                std::forward<long long> ( end_passes_ )
+            } {}
+
+        const_iterator ( const_iterator && it_ ) noexcept      = default;
+        const_iterator ( const_iterator const & it_ ) noexcept = default;
+
+        [[maybe_unused]] const_iterator & operator= ( const_iterator && r_ ) noexcept {
+            node = std::forward<const_node_ptr> ( r_.node );
+        }
+        [[maybe_unused]] const_iterator & operator= ( const_iterator const & r_ ) noexcept { node = r_.node; }
+
+        ~const_iterator ( ) = default;
+
+        [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
+            node = node->next;
+            if ( node == end_node and skip_end ) {
+                node = node->next;
+                skip_end -= 1;
+            }
+            return *this;
+        }
+        [[maybe_unused]] const_iterator & operator-- ( ) noexcept {
+            node = node->prev;
+            if ( node == end_node and skip_end ) {
+                node = node->prev;
+                skip_end -= 1;
+            }
+            return *this;
+        }
+
+        [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept { return node == r_.node; }
+        [[nodiscard]] bool operator!= ( const_iterator const & r_ ) const noexcept { return node != r_.node; }
+        [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
+        [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
+    };
+
+    class alignas ( 64 ) iterator final {
+
+        friend class lock_free_plf_list;
+
+        node_ptr node, end_node;
+        long long skip_end; // will throw on (negative-) overflow, not handled
+
+        public:
+        using iterator_category = std::bidirectional_iterator_tag;
+
+        iterator ( node_ptr node_, node_ptr end_node_, long long end_passes_ ) noexcept :
+            node{ std::forward<node_ptr> ( node_ ) }, end_node{ std::forward<node_ptr> ( end_node_ ) }, skip_end{
+                std::forward<long long> ( end_passes_ )
+            } {}
+
+        iterator ( iterator && it_ ) noexcept      = default;
+        iterator ( iterator const & it_ ) noexcept = default;
+
         [[maybe_unused]] iterator & operator= ( iterator && r_ ) noexcept { node = std::forward<node_ptr> ( r_.node ); }
         [[maybe_unused]] iterator & operator= ( iterator const & r_ ) noexcept { node = r_.node; }
 
@@ -621,17 +673,78 @@ class lock_free_plf_list {
 
         [[maybe_unused]] iterator & operator++ ( ) noexcept {
             node = node->next;
+            if ( node == end_node and skip_end ) {
+                node = node->next;
+                skip_end -= 1;
+            }
             return *this;
         }
         [[maybe_unused]] iterator & operator-- ( ) noexcept {
             node = node->prev;
+            if ( node == end_node and skip_end ) {
+                node = node->prev;
+                skip_end -= 1;
+            }
             return *this;
         }
+
         [[nodiscard]] bool operator== ( iterator const & r_ ) const noexcept { return node == r_.node; }
         [[nodiscard]] bool operator!= ( iterator const & r_ ) const noexcept { return node != r_.node; }
         [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
         [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
     };
+
+    private:
+    [[nodiscard]] const_iterator end_implementation ( long long end_passes_ = 0 ) const noexcept {
+        return const_iterator{ ( const_node_ptr ) end_link, ( const_node_ptr ) end_link, std::forward<long long> ( end_passes_ ) };
+    }
+    [[nodiscard]] const_iterator cend_implementation ( long long end_passes_ = 0 ) const noexcept {
+        return end_implementation ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] iterator end_implementation ( long long end_passes_ = 0 ) noexcept {
+        return const_cast<iterator> ( std::as_const ( this ) )->end_implementation ( std::forward<long long> ( end_passes_ ) );
+    }
+
+    public:
+    [[nodiscard]] const_iterator begin ( long long end_passes_ = 0 ) const noexcept {
+        return ++end_implementation ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] const_iterator cbegin ( long long end_passes_ = 0 ) const noexcept {
+        return begin ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] iterator begin ( long long end_passes_ = 0 ) noexcept {
+        return const_cast<iterator> ( std::as_const ( this ) )->begin ( std::forward<long long> ( end_passes_ ) );
+    }
+
+    [[nodiscard]] const_iterator rbegin ( long long end_passes_ = 0 ) const noexcept {
+        return --end_implementation ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] const_iterator crbegin ( long long end_passes_ = 0 ) const noexcept {
+        return rbegin ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] iterator rbegin ( long long end_passes_ = 0 ) noexcept {
+        return const_cast<iterator> ( std::as_const ( this ) )->rbegin ( std::forward<long long> ( end_passes_ ) );
+    }
+
+    [[nodiscard]] const_iterator end ( long long end_passes_ = 0 ) const noexcept {
+        return end_implementation ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] const_iterator cend ( long long end_passes_ = 0 ) const noexcept {
+        return end ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] iterator end ( long long end_passes_ = 0 ) noexcept {
+        return const_cast<iterator> ( std::as_const ( this ) )->end ( std::forward<long long> ( end_passes_ ) );
+    }
+
+    [[nodiscard]] const_iterator rend ( long long end_passes_ = 0 ) const noexcept {
+        return end ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] const_iterator crend ( long long end_passes_ = 0 ) const noexcept {
+        return rend ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] iterator rend ( long long end_passes_ = 0 ) noexcept {
+        return const_cast<iterator> ( std::as_const ( this ) )->rend ( std::forward<long long> ( end_passes_ ) );
+    }
 
     /*
     void pop ( ) noexcept {
@@ -659,12 +772,16 @@ class lock_free_plf_list {
     }
     */
 
+    /*
+
     [[nodiscard]] nodes_const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
     [[nodiscard]] nodes_const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
     [[nodiscard]] nodes_iterator begin ( ) noexcept { return nodes.begin ( ); }
     [[nodiscard]] nodes_const_iterator end ( ) const noexcept { return nodes.end ( ); }
     [[nodiscard]] nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
     [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
+
+    */
 
     template<typename Stream>
     Stream & ostream ( Stream & out_ ) noexcept {
