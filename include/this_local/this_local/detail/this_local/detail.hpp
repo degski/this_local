@@ -657,6 +657,12 @@ class lock_free_plf_list final {
         [[maybe_unused]] const_iterator & operator= ( const_iterator && ) noexcept = default;
         [[maybe_unused]] const_iterator & operator= ( const_iterator const & ) noexcept = default;
 
+        [[maybe_unused]] const_iterator & operator= ( iterator const & o_ ) noexcept {
+            node     = o_.node;
+            end_node = o_.end_node;
+            skip_end = o_.skip_end;
+        };
+
         ~const_iterator ( ) = default;
 
         [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
