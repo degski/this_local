@@ -586,24 +586,25 @@ class lock_free_plf_list {
         back.store ( { ( ( counted_link ) *p_ ), p_ }, std::memory_order_relaxed );
     }
 
+    [[nodiscard]] node_ptr get_old_node ( ) const noexcept {
+        counted_node_link b = back.load ( std::memory_order_relaxed );
+        return b.node;
+    }
+
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
-        node_ptr regular  = &*it_;
-        counted_link link = get_link ( regular, back.load ( std::memory_order_relaxed ) );
 
-        std::cout << nl;
-        std::cout << ( ( counted_link & ) *link.next ) << nl;
-        counted_node_link last = back.load ( std::memory_order_relaxed );
-        std::cout << ( ( counted_link & ) last ) << nl;
-        std::cout << link << nl;
-        std::cout << nl;
+        node_ptr new_node = &*it_;
 
-        // while ( not
-        dwcas ( ( volatile long long * ) link.next, back.load ( std::memory_order_relaxed ),
-                ( uint128_t * ) regular ); // )
-                                           //     yield ( );
+        do {
+            node_ptr old_node = get_old_node ( );
+            // set new nodes' counted_link to old nodes' counted link
+            *( ( counted_link * ) new_node ) = *( ( counted_link * ) old_node );
+
+        } while ( not dwcas ( *( ( counted_link * ) old_node ), back.load ( std::memory_order_relaxed ),
+                              *( ( counted_link * ) new_node ) ) );
 
         back_store ( regular );
-        regular->next->prev = regular;
+        new_node->next->prev = regular;
         return std::forward<nodes_iterator> ( it_ );
     }
 
