@@ -254,8 +254,8 @@ struct slim_rw_lock final {
     ;
 
 namespace at {
-struct back {};
 struct front {};
+struct back {};
 }; // namespace at
 
 template<typename T, typename Allocator = std::allocator<T>>
@@ -545,15 +545,25 @@ class lock_free_plf_list {
     using nodes_iterator       = typename nodes_type::iterator;
     using nodes_const_iterator = typename nodes_type::const_iterator;
 
-    nodes_type nodes;
-    std::atomic<counted_node_link> back;
+    // class variables
 
-    nodes_iterator ( lock_free_plf_list::*insert_implementation ) ( nodes_iterator && ) noexcept;
+    alignas ( 64 ) std::atomic<counted_node_link> sentinel; // the work-horse
 
     public:
-    spin_rw_lock<char> instance;
+    alignas ( 64 ) spin_rw_lock<long long> instance;
 
-    lock_free_plf_list ( ) : insert_implementation{ &lock_free_plf_list::insert_first_implementation } {}
+    private:
+    nodes_type nodes;
+    nodes_iterator ( lock_free_plf_list::*insert_front_implementation ) ( nodes_iterator && ) noexcept;
+    nodes_iterator ( lock_free_plf_list::*insert_back_implementation ) ( nodes_iterator && ) noexcept;
+
+    // constructors
+
+    public:
+    lock_free_plf_list ( ) :
+        insert_front_implementation{ &lock_free_plf_list::insert_first_implementation }, insert_back_implementation{
+            &lock_free_plf_list::insert_first_implementation
+        } {}
 
     lock_free_plf_list ( value_type const & data_ ) { insert_first_implementation ( nodes.emplace ( data_ ) ); }
     lock_free_plf_list ( value_type && data_ ) {
@@ -570,32 +580,32 @@ class lock_free_plf_list {
         do {
             new_counter = *old_counter_;
             new_counter.external_count += 1;
-        } while ( not dwcas ( old_counter_, back.load ( std::memory_order_relaxed ),
+        } while ( not dwcas ( old_counter_, sentinel.load ( std::memory_order_relaxed ),
                               new_counter ) ); // not head.compare_exchange_strong ( old_counter_, new_counter,
                                                // std::memory_order_acquire, std::memory_order_relaxed )
         old_counter_->external_count = new_counter.external_count;
     }
 
-    HEDLEY_ALWAYS_INLINE void counted_back_store ( node_ptr p_, counted_link l_, unsigned char aba_id_ = 0 ) noexcept {
+    HEDLEY_ALWAYS_INLINE void store_sentinel ( node_ptr p_, counted_link l_, unsigned char aba_id_ = 0 ) noexcept {
         std::memcpy ( reinterpret_cast<char *> ( &p_ ) + 7, &aba_id_, 1 ); // little-endian?
-        back.store ( { std::forward<counted_link> ( l_ ), std::forward<node_ptr> ( p_ ) }, std::memory_order_relaxed );
+        sentinel.store ( { std::forward<counted_link> ( l_ ), std::forward<node_ptr> ( p_ ) }, std::memory_order_relaxed );
     }
 
     template<typename At>
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
         node_ptr new_node       = &*it_;
-        counted_node_link old   = back.load ( std::memory_order_relaxed );
+        counted_node_link old   = sentinel.load ( std::memory_order_relaxed );
         unsigned char new_aba   = std::exchange ( *( reinterpret_cast<char *> ( &old.node ) + 7 ), 0 )++;
         *counted_link::new_node = { old.node, old.node->next };
-        counted_back_store ( new_node, { old.node->prev, new_node }, new_aba );
-        while ( not dwcas ( *counted_link::old.node, back.load ( std::memory_order_relaxed ), *counted_link::new_node ) ) {
-            old = back.load ( std::memory_order_relaxed );
+        store_sentinel ( new_node, { old.node->prev, new_node }, new_aba );
+        while ( not dwcas ( *counted_link::old.node, sentinel.load ( std::memory_order_relaxed ), *counted_link::new_node ) ) {
+            old = sentinel.load ( std::memory_order_relaxed );
             std::memset ( reinterpret_cast<char *> ( &old.node ) + 7, 0, 1 );
             *counted_link::new_node = { old.node, old.node->next };
-            if constexpr ( std::is_same<at::back, At>::value )
-                counted_back_store ( new_node, { old.node->prev, new_node }, new_aba );
+            if constexpr ( std::is_same<at::front, At>::value )
+                store_sentinel ( old.node, { old.node->prev, new_node }, new_aba );
             else
-                counted_back_store ( old.node, { old.node->prev, new_node }, new_aba );
+                store_sentinel ( new_node, { old.node->prev, new_node }, new_aba );
         }
         new_node->next->prev = new_node;
         return std::forward<nodes_iterator> ( it_ );
@@ -606,37 +616,58 @@ class lock_free_plf_list {
         auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
         std::scoped_lock lock ( instance );
         node_ptr second                = &*it_;
-        counted_node_link first        = back.load ( std::memory_order_relaxed );
+        counted_node_link first        = sentinel.load ( std::memory_order_relaxed );
         *counted_link::second          = { counted_link::first.node, counted_link::first.node, 1 };
         *counted_link::first.node.prev = *counted_link::first.node.next = second;
-        if constexpr ( std::is_same<at::back, At>::value )
-            counted_back_store ( second, { first.node, first.node }, 1 );
-        else
-            counted_back_store ( first, { first.node, first.node }, 1 );
-        insert_implementation = &lock_free_plf_list::insert_regular_implementation<At>;
+        if constexpr ( std::is_same<at::front, At>::value ) {
+            store_sentinel ( first, { first.node, first.node }, 1 );
+            insert_front_implementation = &lock_free_plf_list::insert_regular_implementation<at::front>;
+        }
+        else {
+            store_sentinel ( second, { first.node, first.node }, 1 );
+            insert_back_implementation = &lock_free_plf_list::insert_regular_implementation<at::back>;
+        }
         return std::forward<nodes_iterator> ( it_ );
     }
 
-    template<typename At>
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_first_implementation ( nodes_iterator && it_ ) noexcept {
         std::scoped_lock lock ( instance );
         node_ptr first       = &*it_;
         *counted_link::first = { ( counted_link_ptr ) first, ( counted_link_ptr ) first, 1 };
-        counted_back_store ( first, { first, first }, 1 );
-        insert_implementation = &lock_free_plf_list::insert_second_implementation<At>;
+        store_sentinel ( first, { first, first }, 1 );
+        insert_front_implementation = &lock_free_plf_list::insert_second_implementation<at::front>;
+        insert_back_implementation  = &lock_free_plf_list::insert_second_implementation<at::back>;
         return std::forward<nodes_iterator> ( it_ );
     }
 
     public:
-    [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) {
-        return ( this->*insert_implementation ) ( nodes.emplace ( data_ ) );
+    [[maybe_unused]] nodes_iterator push_back ( value_type const & data_ ) {
+        return ( this->*insert_back_implementation ) ( nodes.emplace ( data_ ) );
     }
-    [[maybe_unused]] nodes_iterator push ( value_type && data_ ) {
-        return ( this->*insert_implementation ) ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+    [[maybe_unused]] nodes_iterator push_back ( value_type && data_ ) {
+        return ( this->*insert_back_implementation ) ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
+    [[maybe_unused]] nodes_iterator emplace_back ( Args &&... args_ ) {
+        return ( this->*insert_back_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+    }
+
+    [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) { return push_back ( data_ ); }
+    [[maybe_unused]] nodes_iterator push ( value_type && data_ ) { return push_back ( std::forward<value_type> ( data_ ) ); }
+    template<typename... Args>
     [[maybe_unused]] nodes_iterator emplace ( Args &&... args_ ) {
-        return ( this->*insert_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+        return emplace_back ( std::forward<Args> ( args_ )... );
+    }
+
+    [[maybe_unused]] nodes_iterator push_front ( value_type const & data_ ) {
+        return ( this->*insert_front_implementation ) ( nodes.emplace ( data_ ) );
+    }
+    [[maybe_unused]] nodes_iterator push_front ( value_type && data_ ) {
+        return ( this->*insert_front_implementation ) ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+    }
+    template<typename... Args>
+    [[maybe_unused]] nodes_iterator emplace_front ( Args &&... args_ ) {
+        return ( this->*insert_front_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
     /*
