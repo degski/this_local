@@ -370,75 +370,6 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         }
     }
 
-    /*
-
-    class const_iterator {
-        friend class lock_free_plf_stack;
-
-        const_node_ptr p;
-
-        public:
-        using iterator_category = std::forward_iterator_tag;
-
-        const_iterator ( const_node_ptr p_ ) noexcept : p{ std::forward<const_node_ptr> ( p_ ) } {}
-        const_iterator ( const_iterator && it_ ) noexcept : p{ std::forward<const_node_ptr> ( it_.p ) } {}
-        const_iterator ( const_iterator const & it_ ) noexcept : p{ it_.p } {}
-        [[maybe_unused]] const_iterator & operator= ( const_iterator && r_ ) noexcept { p = std::forward<const_node_ptr> ( r_.p ); }
-        [[maybe_unused]] const_iterator & operator= ( const_iterator const & r_ ) noexcept { p = r_.p; }
-
-        ~const_iterator ( ) = default;
-
-        [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
-            p = p->link.next;
-            return *this;
-        }
-        [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept { return p == r_.p; }
-        [[nodiscard]] bool operator!= ( const_iterator const & r_ ) const noexcept { return p != r_.p; }
-        [[nodiscard]] const_reference operator* ( ) const noexcept { return p->data; }
-        [[nodiscard]] const_pointer operator-> ( ) const noexcept { return &p->data; }
-    };
-
-    class iterator {
-        friend class lock_free_plf_stack;
-
-        node_ptr p;
-
-        public:
-        using iterator_category = std::forward_iterator_tag;
-
-        iterator ( const_iterator it_ ) noexcept : p{ const_cast<node_ptr> ( std::forward<const_node_ptr> ( it_.p ) ) } {}
-        iterator ( node_ptr p_ ) noexcept : p{ std::forward<node_ptr> ( p_ ) } {}
-        iterator ( iterator && it_ ) noexcept : p{ std::forward<node_ptr> ( it_.p ) } {}
-        iterator ( iterator const & it_ ) noexcept : p{ it_.p } {}
-        [[maybe_unused]] iterator & operator= ( iterator && r_ ) noexcept { p = std::forward<node_ptr> ( r_.p ); }
-        [[maybe_unused]] iterator & operator= ( iterator const & r_ ) noexcept { p = r_.p; }
-
-        ~iterator ( ) = default;
-
-        [[maybe_unused]] iterator & operator++ ( ) noexcept {
-            p = p->link.next;
-            return *this;
-        }
-        [[nodiscard]] bool operator== ( iterator const & r_ ) const noexcept { return p == r_.p; }
-        [[nodiscard]] bool operator!= ( iterator const & r_ ) const noexcept { return p != r_.p; }
-        [[nodiscard]] reference operator* ( ) const noexcept { return p->data; }
-        [[nodiscard]] pointer operator-> ( ) const noexcept { return &p->data; }
-    };
-
-    [[nodiscard]] const_iterator begin ( ) const noexcept {
-        const_iterator it = head.load ( std::memory_order_relaxed ).next;
-        ++it;
-        return it;
-    }
-    [[nodiscard]] const_iterator end ( ) const noexcept { return head.load ( std::memory_order_relaxed ).next; }
-
-    [[nodiscard]] const_iterator cbegin ( ) const noexcept { return begin ( ); }
-    [[nodiscard]] const_iterator cend ( ) const noexcept { return end ( ); }
-    [[nodiscard]] iterator begin ( ) noexcept { return iterator{ const_cast<lock_free_plf_stack const *> ( this )->begin ( ) }; }
-    [[nodiscard]] iterator end ( ) noexcept { return iterator{ const_cast<lock_free_plf_stack const *> ( this )->end ( ) }; }
-
-    */
-
     [[nodiscard]] nodes_const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
     [[nodiscard]] nodes_const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
     [[nodiscard]] nodes_iterator begin ( ) noexcept { return nodes.begin ( ); }
@@ -670,6 +601,38 @@ class lock_free_plf_list {
         return ( this->*insert_front_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
+    class iterator {
+        friend class lock_free_plf_list;
+
+        node_ptr node;
+
+        public:
+        using iterator_category = std::bidirectional_iterator_tag;
+
+        //   iterator ( const_iterator it_ ) noexcept : node{ const_cast<node_ptr> ( std::forward<const_node_ptr> ( it_.node ) ) }
+        //   {}
+        iterator ( node_ptr node_ ) noexcept : node{ std::forward<node_ptr> ( node_ ) } {}
+        iterator ( iterator && it_ ) noexcept : node{ std::forward<node_ptr> ( it_.node ) } {}
+        iterator ( iterator const & it_ ) noexcept : node{ it_.node } {}
+        [[maybe_unused]] iterator & operator= ( iterator && r_ ) noexcept { node = std::forward<node_ptr> ( r_.node ); }
+        [[maybe_unused]] iterator & operator= ( iterator const & r_ ) noexcept { node = r_.node; }
+
+        ~iterator ( ) = default;
+
+        [[maybe_unused]] iterator & operator++ ( ) noexcept {
+            node = node->next;
+            return *this;
+        }
+        [[maybe_unused]] iterator & operator-- ( ) noexcept {
+            node = node->prev;
+            return *this;
+        }
+        [[nodiscard]] bool operator== ( iterator const & r_ ) const noexcept { return node == r_.node; }
+        [[nodiscard]] bool operator!= ( iterator const & r_ ) const noexcept { return node != r_.node; }
+        [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
+        [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
+    };
+
     /*
     void pop ( ) noexcept {
         counted_link old_head = head.load ( std::memory_order_relaxed );
@@ -694,74 +657,6 @@ class lock_free_plf_list {
             }
         }
     }
-    */
-    /*
-
-    class const_iterator {
-        friend class lock_free_plf_list;
-
-        const_node_ptr p;
-
-        public:
-        using iterator_category = std::forward_iterator_tag;
-
-        const_iterator ( const_node_ptr p_ ) noexcept : p{ std::forward<const_node_ptr> ( p_ ) } {}
-        const_iterator ( const_iterator && it_ ) noexcept : p{ std::forward<const_node_ptr> ( it_.p ) } {}
-        const_iterator ( const_iterator const & it_ ) noexcept : p{ it_.p } {}
-        [[maybe_unused]] const_iterator & operator= ( const_iterator && r_ ) noexcept { p = std::forward<const_node_ptr> ( r_.p ); }
-        [[maybe_unused]] const_iterator & operator= ( const_iterator const & r_ ) noexcept { p = r_.p; }
-
-        ~const_iterator ( ) = default;
-
-        [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
-            p = p->next.link;
-            return *this;
-        }
-        [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept { return p == r_.p; }
-        [[nodiscard]] bool operator!= ( const_iterator const & r_ ) const noexcept { return p != r_.p; }
-        [[nodiscard]] const_reference operator* ( ) const noexcept { return p->data; }
-        [[nodiscard]] const_pointer operator-> ( ) const noexcept { return &p->data; }
-    };
-
-    class iterator {
-        friend class lock_free_plf_list;
-
-        node_ptr p;
-
-        public:
-        using iterator_category = std::forward_iterator_tag;
-
-        iterator ( const_iterator it_ ) noexcept : p{ const_cast<node_ptr> ( std::forward<const_node_ptr> ( it_.p ) ) } {}
-        iterator ( node_ptr p_ ) noexcept : p{ std::forward<node_ptr> ( p_ ) } {}
-        iterator ( iterator && it_ ) noexcept : p{ std::forward<node_ptr> ( it_.p ) } {}
-        iterator ( iterator const & it_ ) noexcept : p{ it_.p } {}
-        [[maybe_unused]] iterator & operator= ( iterator && r_ ) noexcept { p = std::forward<node_ptr> ( r_.p ); }
-        [[maybe_unused]] iterator & operator= ( iterator const & r_ ) noexcept { p = r_.p; }
-
-        ~iterator ( ) = default;
-
-        [[maybe_unused]] iterator & operator++ ( ) noexcept {
-            p = p->next.link;
-            return *this;
-        }
-        [[nodiscard]] bool operator== ( iterator const & r_ ) const noexcept { return p == r_.p; }
-        [[nodiscard]] bool operator!= ( iterator const & r_ ) const noexcept { return p != r_.p; }
-        [[nodiscard]] reference operator* ( ) const noexcept { return p->data; }
-        [[nodiscard]] pointer operator-> ( ) const noexcept { return &p->data; }
-    };
-
-    [[nodiscard]] const_iterator begin ( ) const noexcept {
-        const_iterator it = head.load ( std::memory_order_relaxed ).link;
-        ++it;
-        return it;
-    }
-    [[nodiscard]] const_iterator end ( ) const noexcept { return head.load ( std::memory_order_relaxed ).link; }
-
-    [[nodiscard]] const_iterator cbegin ( ) const noexcept { return begin ( ); }
-    [[nodiscard]] const_iterator cend ( ) const noexcept { return end ( ); }
-    [[nodiscard]] iterator begin ( ) noexcept { return iterator{ const_cast<lock_free_plf_list const *> ( this )->begin ( ) }; }
-    [[nodiscard]] iterator end ( ) noexcept { return iterator{ const_cast<lock_free_plf_list const *> ( this )->end ( ) }; }
-
     */
 
     [[nodiscard]] nodes_const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
