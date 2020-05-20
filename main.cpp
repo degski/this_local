@@ -200,6 +200,18 @@ int main5686780 ( ) {
 
 int main ( ) {
 
+    sax::uint128_t de = { 1, 2 };
+    sax::uint128_t ex = { 3, 4 };
+    sax::uint128_t cr = { 0, 2 };
+
+    std::cout << de << cr << nl;
+    std::cout << sax::soft_dwcas<sax::spin_rw_lock<long long>> ( de, ex, cr ) << nl;
+    std::cout << de << cr << nl;
+
+    exit ( 0 );
+
+    /*
+
     std::ios::sync_with_stdio ( false );
 
     constexpr int N = 4;
@@ -217,7 +229,7 @@ int main ( ) {
 
     // list.emplace ( 3 );
     // list.ostream ( std::cout );
-
+    */
     /*
 
     std::uint64_t duration;

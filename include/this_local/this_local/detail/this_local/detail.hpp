@@ -90,39 +90,6 @@ HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
 #endif
 }
 
-template<typename P, typename T, typename U>
-[[nodiscard]] inline bool dwcas ( P * destination_, T result_, U exchange_ ) noexcept {
-
-    static_assert ( sizeof ( T ) >= 16, "size >= 16" );
-    static_assert ( sizeof ( T ) >= sizeof ( U ), "size error" );
-    static_assert ( alignof ( T ) >= 16, "alignment error T" );
-    static_assert ( alignof ( U ) >= 16, "alignment error U" );
-
-    volatile long long * destination = ( volatile long long * ) destination_;
-
-    struct alignas ( 16 ) uint128_t {
-        long long lo;
-        long long hi;
-    };
-
-    uint128_t result;
-    memcpy ( &result, &result_, sizeof ( result ) );
-    uint128_t exchange;
-    memcpy ( &exchange, &exchange_, sizeof ( exchange ) );
-
-#if ( defined( __clang__ ) or defined( __GNUC__ ) )
-    bool value;
-    __asm__ __volatile__( "lock cmpxchg16b %1\n\t"
-                          "setz %0"
-                          : "=q"( value ), "+m"( *destination ), "+d"( result.hi ), "+a"( result.lo )
-                          : "c"( exchange.hi ), "b"( exchange.lo )
-                          : "cc" );
-    return value;
-#else
-    return _InterlockedCompareExchange128 ( destination, exchange.hi, exchange.lo, &result.lo );
-#endif
-}
-
 [[nodiscard]] bool has_thread_exited ( std::thread::native_handle_type handle_ ) noexcept {
 #if defined( _MSC_VER )
     FILETIME creationTime;
@@ -134,6 +101,63 @@ template<typename P, typename T, typename U>
 #else
 
 #endif
+}
+
+struct alignas ( 16 ) uint128_t {
+    long long lo;
+    long long hi;
+};
+
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( volatile sax::uint128_t & dest_, sax::uint128_t ex_new_,
+                                                sax::uint128_t & cr_old_ ) noexcept {
+#if ( defined( __clang__ ) or defined( __GNUC__ ) )
+    bool value;
+    __asm__ __volatile__( "lock cmpxchg16b %1\n\t"
+                          "setz %0"
+                          : "=q"( value ), "+m"( dest_ ), "+d"( cr_old_.hi ), "+a"( cr_old_.lo )
+                          : "c"( ex_new_.hi ), "b"( ex_new_.lo )
+                          : "cc" );
+    return value;
+#else
+    return _InterlockedCompareExchange128 ( ( volatile long long * ) &dest_.lo, ex_new_.hi, ex_new_.lo,
+                                            ( long long * ) &cr_old_.lo );
+#endif
+}
+
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m64 ( void const * const a_, void const * const b_ ) noexcept {
+    std::uint64_t a;
+    std::memcpy ( &a, a_, sizeof ( a ) );
+    std::uint64_t b;
+    std::memcpy ( &b, b_, sizeof ( b ) );
+    return a == b;
+}
+
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m128 ( void const * const a_, void const * const b_ ) noexcept {
+    return 0xF == _mm_movemask_ps ( _mm_cmpeq_ps ( _mm_load_ps ( ( float * ) a_ ), _mm_load_ps ( ( float * ) b_ ) ) );
+}
+
+// Algorithms built around CAS typically read some key memory location and remember the old value. Based on that old value, they
+// compute some new value. Then they try to swap in the new value using CAS, where the comparison checks for the location still
+// being equal to the old value. If CAS indicates that the attempt has failed, it has to be repeated from the beginning: the
+// location is re-read, a new value is re-computed and the CAS is tried again. Instead of immediately retrying after a CAS
+// operation fails, researchers have found that total system performance can be improved in multiprocessor systems—where many
+// threads constantly update some particular shared variable if threads that see their CAS fail use exponential backoff, in
+// other words, wait a little before retrying the CAS.
+
+// while ( not dwcas ( link.next, back.load ( std::memory_order_relaxed ), link ) )
+//     yield ( );
+
+template<typename MutexType>
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool soft_dwcas ( sax::uint128_t & dest_, sax::uint128_t ex_new_,
+                                                     sax::uint128_t & cr_old_ ) noexcept {
+    alignas ( 64 ) static MutexType cas_mutex;
+    std::scoped_lock lock ( cas_mutex );
+    bool check = not equal_m128 ( &dest_, &cr_old_ );
+    std::memcpy ( &cr_old_, &dest_, 16 );
+    if ( check )
+        return false;
+    std::memcpy ( &dest_, &ex_new_, 16 );
+    return true;
 }
 
 [[nodiscard]] static constexpr int ilog2 ( std::uint64_t v_ ) noexcept {
@@ -150,18 +174,6 @@ template<typename T>
     a ^= a >> 32;                  // fold high over low
     a ^= a >> 16;                  // fold high over low
     return ( std::uint16_t ) a;
-}
-
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m64 ( void const * const a_, void const * const b_ ) noexcept {
-    std::uint64_t a;
-    std::memcpy ( &a, a_, sizeof ( a ) );
-    std::uint64_t b;
-    std::memcpy ( &b, b_, sizeof ( b ) );
-    return a == b;
-}
-
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m128 ( void const * const a_, void const * const b_ ) noexcept {
-    return 0xF == _mm_movemask_ps ( _mm_cmpeq_ps ( _mm_load_ps ( ( float * ) a_ ), _mm_load_ps ( ( float * ) b_ ) ) );
 }
 
 // Never NULL ttas rw spin-lock.
@@ -444,6 +456,8 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
 template<typename T, typename Allocator>
 alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_stack<T, Allocator>::global;
 
+alignas ( 64 ) inline static spin_rw_lock<long long> global_mutex;
+
 template<typename T, typename Allocator = std::allocator<T>>
 class lock_free_plf_list {
 
@@ -462,7 +476,7 @@ class lock_free_plf_list {
         template<typename Stream>
         [[maybe_unused]] friend Stream & operator<< ( Stream & out_, counted_link const & link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            std::scoped_lock lock ( lock_free_plf_list::global );
+            std::scoped_lock lock ( global_mutex );
             out_ << '<' << ap ( link_.prev ) << ' ' << ap ( link_.next ) << '.' << link_.external_count << '>';
             return out_;
         }
@@ -481,7 +495,7 @@ class lock_free_plf_list {
         template<typename Stream>
         [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const * link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            std::scoped_lock lock ( lock_free_plf_list::global );
+            std::scoped_lock lock ( global_mutex );
             out_ << '<' << ap ( &*link_ ) << ' ' << ap ( link_->prev ) << ' ' << ap ( link_->next ) << '.' << link_->external_count
                  << '>';
             return out_;
@@ -508,7 +522,7 @@ class lock_free_plf_list {
         template<typename Stream>
         [[maybe_unused]] friend Stream & operator<< ( Stream & out_, counted_node_link const & link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            std::scoped_lock lock ( lock_free_plf_list::global );
+            std::scoped_lock lock ( global_mutex );
             out_ << '<' << ap ( &link_ ) << ' ' << ap ( link_->prev ) << ' ' << ap ( link_->next ) << '.' << link_->external_count
                  << '>';
             return out_;
@@ -535,8 +549,6 @@ class lock_free_plf_list {
 
     public:
     spin_rw_lock<char> instance;
-    alignas ( 64 ) static spin_rw_lock<long long> global;
-    alignas ( 64 ) static spin_rw_lock<long long> cas;
 
     lock_free_plf_list ( ) : insert_implementation{ &lock_free_plf_list::insert_first_implementation } {}
 
@@ -586,36 +598,13 @@ class lock_free_plf_list {
         std::cout << nl;
 
         // while ( not
-        soft_dwcas ( link.next, back.load ( std::memory_order_relaxed ), link ); // )
-                                                                                 //     yield ( );
+        dwcas ( ( volatile long long * ) link.next, back.load ( std::memory_order_relaxed ),
+                ( uint128_t * ) regular ); // )
+                                           //     yield ( );
 
         back_store ( regular );
         regular->next->prev = regular;
         return std::forward<nodes_iterator> ( it_ );
-    }
-
-    // Algorithms built around CAS typically read some key memory location and remember the old value. Based on that old value, they
-    // compute some new value. Then they try to swap in the new value using CAS, where the comparison checks for the location still
-    // being equal to the old value. If CAS indicates that the attempt has failed, it has to be repeated from the beginning: the
-    // location is re-read, a new value is re-computed and the CAS is tried again. Instead of immediately retrying after a CAS
-    // operation fails, researchers have found that total system performance can be improved in multiprocessor systems—where many
-    // threads constantly update some particular shared variable if threads that see their CAS fail use exponential backoff, in
-    // other words, wait a little before retrying the CAS.
-
-    // while ( not dwcas ( link.next, back.load ( std::memory_order_relaxed ), link ) )
-    //     yield ( );
-
-    template<typename A, typename B>
-    // [[nodiscard]]
-    bool soft_dwcas ( A * old_location_, B old_copy_, A new_value_ ) const noexcept {
-        std::scoped_lock lock ( cas );
-        if ( not equal_m128 ( old_location_, &old_copy_ ) ) {
-            std::cout << "swapped: false" << nl;
-            return false;
-        }
-        std::memcpy ( old_location_, &new_value_, 16 );
-        std::cout << "swapped: true" << nl;
-        return true;
     }
 
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_second_implementation ( nodes_iterator && it_ ) noexcept {
@@ -768,11 +757,12 @@ class lock_free_plf_list {
     static constexpr int offset_data = static_cast<int> ( offsetof ( node, data ) );
 };
 
-template<typename T, typename Allocator>
-alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_list<T, Allocator>::global;
-
-template<typename T, typename Allocator>
-alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_list<T, Allocator>::cas;
+template<typename Stream>
+[[maybe_unused]] Stream & operator<< ( Stream & out_, uint128_t const & i_ ) noexcept {
+    std::scoped_lock lock ( global_mutex );
+    out_ << '<' << i_.lo << ' ' << i_.hi << '>';
+    return out_;
+}
 
 #undef ever
 
