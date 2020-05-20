@@ -604,13 +604,11 @@ class lock_free_plf_list final {
                 std::forward<long long> ( end_passes_ )
             } {}
 
-        const_iterator ( const_iterator && it_ ) noexcept      = default;
-        const_iterator ( const_iterator const & it_ ) noexcept = default;
+        const_iterator ( const_iterator && ) noexcept      = default;
+        const_iterator ( const_iterator const & ) noexcept = default;
 
-        [[maybe_unused]] const_iterator & operator= ( const_iterator && r_ ) noexcept {
-            node = std::forward<const_node_ptr> ( r_.node );
-        }
-        [[maybe_unused]] const_iterator & operator= ( const_iterator const & r_ ) noexcept { node = r_.node; }
+        [[maybe_unused]] const_iterator & operator= ( const_iterator && ) noexcept = default;
+        [[maybe_unused]] const_iterator & operator= ( const_iterator const & ) noexcept = default;
 
         ~const_iterator ( ) = default;
 
@@ -652,11 +650,11 @@ class lock_free_plf_list final {
                 std::forward<long long> ( end_passes_ )
             } {}
 
-        iterator ( iterator && it_ ) noexcept      = default;
-        iterator ( iterator const & it_ ) noexcept = default;
+        iterator ( iterator && ) noexcept      = default;
+        iterator ( iterator const & ) noexcept = default;
 
-        [[maybe_unused]] iterator & operator= ( iterator && r_ ) noexcept { node = std::forward<node_ptr> ( r_.node ); }
-        [[maybe_unused]] iterator & operator= ( iterator const & r_ ) noexcept { node = r_.node; }
+        [[maybe_unused]] iterator & operator= ( iterator && ) noexcept = default;
+        [[maybe_unused]] iterator & operator= ( iterator const & ) noexcept = default;
 
         ~iterator ( ) = default;
 
