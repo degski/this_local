@@ -682,13 +682,13 @@ class lock_free_plf_list final {
     };
 
     private:
-    [[nodiscard]] const_iterator end_implementation ( long long end_passes_ = 0 ) const noexcept {
+    [[nodiscard]] const_iterator end_implementation ( long long end_passes_ ) const noexcept {
         return const_iterator{ ( const_node_ptr ) end_link, ( const_node_ptr ) end_link, std::forward<long long> ( end_passes_ ) };
     }
-    [[nodiscard]] const_iterator cend_implementation ( long long end_passes_ = 0 ) const noexcept {
+    [[nodiscard]] const_iterator cend_implementation ( long long end_passes_ ) const noexcept {
         return end_implementation ( std::forward<long long> ( end_passes_ ) );
     }
-    [[nodiscard]] iterator end_implementation ( long long end_passes_ = 0 ) noexcept {
+    [[nodiscard]] iterator end_implementation ( long long end_passes_ ) noexcept {
         return const_cast<iterator> ( std::as_const ( this ) )->end_implementation ( std::forward<long long> ( end_passes_ ) );
     }
 
