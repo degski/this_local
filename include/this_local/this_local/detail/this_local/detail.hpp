@@ -448,8 +448,8 @@ alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_stack<T, Allocator>::global
 
 alignas ( 64 ) inline static spin_rw_lock<long long> global_mutex;
 
-template<typename T, typename Allocator = std::allocator<T>>
-class concurrent_circular_list final {
+template<typename T, typename Allocator = std::allocator<T>, typename DefaultInsertionMode = at::back>
+class lockless_unbounded_circular_list final {
 
     public:
     using value_type      = T;
@@ -543,24 +543,25 @@ class concurrent_circular_list final {
 
     nodes_type nodes;
     counted_node_link end_link;
-    nodes_iterator ( concurrent_circular_list::*insert_front_implementation ) ( nodes_iterator && ) noexcept;
-    nodes_iterator ( concurrent_circular_list::*insert_back_implementation ) ( nodes_iterator && ) noexcept;
+    nodes_iterator ( lockless_unbounded_circular_list::*insert_front_implementation ) ( nodes_iterator && ) noexcept;
+    nodes_iterator ( lockless_unbounded_circular_list::*insert_back_implementation ) ( nodes_iterator && ) noexcept;
 
-    // constructors
+    // constructors (insert at the back)
 
     public:
-    concurrent_circular_list ( ) :
-        insert_front_implementation{ &concurrent_circular_list::insert_init_implementation<at::front> }, insert_back_implementation{
-            &concurrent_circular_list::insert_init_implementation<at::back>
-        } {}
+    lockless_unbounded_circular_list ( ) :
+        insert_front_implementation{ &lockless_unbounded_circular_list::insert_init_implementation<at::front> },
+        insert_back_implementation{ &lockless_unbounded_circular_list::insert_init_implementation<at::back> } {}
 
-    concurrent_circular_list ( value_type const & data_ ) { insert_init_implementation ( nodes.emplace ( data_ ) ); }
-    concurrent_circular_list ( value_type && data_ ) {
-        insert_init_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+    lockless_unbounded_circular_list ( value_type const & data_ ) {
+        insert_init_implementation<DefaultInsertionMode> ( nodes.emplace ( data_ ) );
+    }
+    lockless_unbounded_circular_list ( value_type && data_ ) {
+        insert_init_implementation<DefaultInsertionMode> ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
-    concurrent_circular_list ( Args &&... args_ ) {
-        insert_init_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+    lockless_unbounded_circular_list ( Args &&... args_ ) {
+        insert_init_implementation<DefaultInsertionMode> ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
     private:
@@ -586,7 +587,10 @@ class concurrent_circular_list final {
         counted_node_link old   = sentinel.load ( std::memory_order_relaxed );
         unsigned char new_aba   = std::exchange ( *( reinterpret_cast<char *> ( &old.node ) + hi_index<node_ptr> ( ) ), 0 )++;
         *counted_link::new_node = { old.node, old.node->next };
-        store_sentinel ( new_node, { old.node->prev, new_node }, new_aba );
+        if constexpr ( std::is_same<at::front, At>::value )
+            store_sentinel ( old.node, { old.node->prev, new_node }, new_aba );
+        else
+            store_sentinel ( new_node, { old.node->prev, new_node }, new_aba );
         while ( not dwcas ( *counted_link::old.node, sentinel.load ( std::memory_order_relaxed ), *counted_link::new_node ) ) {
             old = sentinel.load ( std::memory_order_relaxed );
             std::memset ( reinterpret_cast<char *> ( &old.node ) + hi_index<node_ptr> ( ), 0, 1 );
@@ -608,11 +612,11 @@ class concurrent_circular_list final {
         end_link                = { counted_link::new_node, counted_link::new_node, nullptr };
         if constexpr ( std::is_same<at::front, At>::value ) {
             store_sentinel ( &end_link, { &end_link, &end_link }, 1 );
-            insert_front_implementation = &concurrent_circular_list::insert_regular_implementation<at::front>;
+            insert_front_implementation = &lockless_unbounded_circular_list::insert_regular_implementation<at::front>;
         }
         else {
             store_sentinel ( new_node, { &end_link, &end_link }, 1 );
-            insert_back_implementation = &concurrent_circular_list::insert_regular_implementation<at::back>;
+            insert_back_implementation = &lockless_unbounded_circular_list::insert_regular_implementation<at::back>;
         }
         return std::forward<nodes_iterator> ( it_ );
     }
@@ -629,11 +633,24 @@ class concurrent_circular_list final {
         return ( this->*insert_back_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
-    [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) { return push_back ( data_ ); }
-    [[maybe_unused]] nodes_iterator push ( value_type && data_ ) { return push_back ( std::forward<value_type> ( data_ ) ); }
+    [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) {
+        if constexpr ( std::is_same<DefaultInsertionMode, at::front>::value )
+            return push_front ( data_ );
+        else
+            return push_back ( data_ );
+    }
+    [[maybe_unused]] nodes_iterator push ( value_type && data_ ) {
+        if constexpr ( std::is_same<DefaultInsertionMode, at::front>::value )
+            return push_front ( std::forward<value_type> ( data_ ) );
+        else
+            return push_back ( std::forward<value_type> ( data_ ) );
+    }
     template<typename... Args>
     [[maybe_unused]] nodes_iterator emplace ( Args &&... args_ ) {
-        return emplace_back ( std::forward<Args> ( args_ )... );
+        if constexpr ( std::is_same<DefaultInsertionMode, at::front>::value )
+            return push_front ( std::forward<Args> ( args_ )... );
+        else
+            return emplace_back ( std::forward<Args> ( args_ )... );
     }
 
     [[maybe_unused]] nodes_iterator push_front ( value_type const & data_ ) {
@@ -649,7 +666,7 @@ class concurrent_circular_list final {
 
     class alignas ( 16 ) iterator final {
 
-        friend class concurrent_circular_list;
+        friend class lockless_unbounded_circular_list;
 
         node_ptr node, end_node;
         long long skip_end; // will throw on (negative-) overflow, not handled
@@ -698,7 +715,7 @@ class concurrent_circular_list final {
 
     class alignas ( 16 ) const_iterator final {
 
-        friend class concurrent_circular_list;
+        friend class lockless_unbounded_circular_list;
 
         mutable const_node_ptr node;
         const_node_ptr end_node;
@@ -841,7 +858,7 @@ class concurrent_circular_list final {
     }
 
     template<typename Stream>
-    [[maybe_unused]] friend Stream & operator<< ( Stream & out_, concurrent_circular_list const & list_ ) noexcept {
+    [[maybe_unused]] friend Stream & operator<< ( Stream & out_, lockless_unbounded_circular_list const & list_ ) noexcept {
         return list_.ostream ( out_ );
     }
 
