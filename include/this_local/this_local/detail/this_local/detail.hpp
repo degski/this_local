@@ -545,15 +545,16 @@ class lock_free_plf_list final {
 
     template<typename At>
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_init_implementation ( nodes_iterator && it_ ) noexcept {
-        node_ptr new_node    = &*it_;
-        *counted_link::first = { ( counted_link_ptr ) &end_link, ( counted_link_ptr ) &end_link, 1 };
-        end_link.prev = end_link.next = new_node;
+        node_ptr new_node       = &*it_;
+        *counted_link::new_node = { &end_link, &end_link, 1 };
+        end_link.prev = end_link.next = counted_link::new_node;
+        std::scoped_lock lock ( instance );
         if constexpr ( std::is_same<at::front, At>::value ) {
-            store_sentinel ( &end_link, { ( counted_link_ptr ) &end_link, ( counted_link_ptr ) &end_link }, 1 );
+            store_sentinel ( &end_link, { &end_link, &end_link }, 1 );
             insert_front_implementation = &lock_free_plf_list::insert_regular_implementation<at::front>;
         }
         else {
-            store_sentinel ( new_node, { ( counted_link_ptr ) &end_link, ( counted_link_ptr ) &end_link }, 1 );
+            store_sentinel ( new_node, { &end_link, &end_link }, 1 );
             insert_back_implementation = &lock_free_plf_list::insert_regular_implementation<at::back>;
         }
         return std::forward<nodes_iterator> ( it_ );
@@ -690,7 +691,8 @@ class lock_free_plf_list final {
 
     private:
     [[nodiscard]] const_iterator end_implementation ( long long end_passes_ ) const noexcept {
-        return const_iterator{ ( const_node_ptr ) end_link, ( const_node_ptr ) end_link, std::forward<long long> ( end_passes_ ) };
+        return const_iterator{ reinterpret_cast<const_node_ptr> ( &end_link ), reinterpret_cast<const_node_ptr> ( &end_link ),
+                               std::forward<long long> ( end_passes_ ) };
     }
     [[nodiscard]] const_iterator cend_implementation ( long long end_passes_ ) const noexcept {
         return end_implementation ( std::forward<long long> ( end_passes_ ) );
@@ -764,17 +766,6 @@ class lock_free_plf_list final {
             }
         }
     }
-    */
-
-    /*
-
-    [[nodiscard]] nodes_const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
-    [[nodiscard]] nodes_const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
-    [[nodiscard]] nodes_iterator begin ( ) noexcept { return nodes.begin ( ); }
-    [[nodiscard]] nodes_const_iterator end ( ) const noexcept { return nodes.end ( ); }
-    [[nodiscard]] nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
-    [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
-
     */
 
     template<typename Stream>
