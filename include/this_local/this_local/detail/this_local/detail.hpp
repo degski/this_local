@@ -545,10 +545,10 @@ class lock_free_plf_list final {
 
     template<typename At>
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_init_implementation ( nodes_iterator && it_ ) noexcept {
+        std::scoped_lock lock ( instance );
         node_ptr new_node       = &*it_;
         *counted_link::new_node = { &end_link, &end_link, 1 };
         end_link.prev = end_link.next = counted_link::new_node;
-        std::scoped_lock lock ( instance );
         if constexpr ( std::is_same<at::front, At>::value ) {
             store_sentinel ( &end_link, { &end_link, &end_link }, 1 );
             insert_front_implementation = &lock_free_plf_list::insert_regular_implementation<at::front>;
