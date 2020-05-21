@@ -550,8 +550,8 @@ class concurrent_circular_list final {
 
     public:
     concurrent_circular_list ( ) :
-        insert_front_implementation{ &concurrent_circular_list::insert_init_implementation }, insert_back_implementation{
-            &concurrent_circular_list::insert_init_implementation
+        insert_front_implementation{ &concurrent_circular_list::insert_init_implementation<at::front> }, insert_back_implementation{
+            &concurrent_circular_list::insert_init_implementation<at::back>
         } {}
 
     concurrent_circular_list ( value_type const & data_ ) { insert_init_implementation ( nodes.emplace ( data_ ) ); }
