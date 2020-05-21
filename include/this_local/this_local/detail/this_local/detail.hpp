@@ -725,9 +725,8 @@ class unbounded_circular_list final {
 
         friend class unbounded_circular_list;
 
-        mutable const_node_ptr node;
-        const_node_ptr end_node;
-        mutable long long skip_end; // will throw on (negative-) overflow, not handled
+        const_node_ptr node, end_node;
+        long long skip_end; // will throw on (negative-) overflow, not handled
 
         const_iterator ( const_node_ptr node_, const_node_ptr end_node_, long long end_passes_ ) noexcept :
             node{ std::forward<const_node_ptr> ( node_ ) }, end_node{ std::forward<const_node_ptr> ( end_node_ ) }, skip_end{
