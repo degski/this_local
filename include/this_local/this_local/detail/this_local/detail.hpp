@@ -712,16 +712,10 @@ class unbounded_circular_list final {
         }
 
         [[nodiscard]] bool operator== ( iterator const & r_ ) const noexcept {
-            if ( node != r_.node ) {
-                if ( node == end_node and skip_end-- ) {
-                    node = node->next;
-                    return node == r_.node;
-                }
-                return false;
-            }
-            else {
-                return true;
-            }
+            bool cmp = node == r_.node;
+            if ( node == end_node and skip_end-- )
+                node = node->next;
+            return cmp;
         }
         [[nodiscard]] bool operator!= ( iterator const & r_ ) const noexcept { return not operator== ( r_ ); }
         [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
@@ -769,16 +763,10 @@ class unbounded_circular_list final {
         }
 
         [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept {
-            if ( node != r_.node ) {
-                if ( node == end_node and skip_end-- ) {
-                    node = node->next;
-                    return node == r_.node;
-                }
-                return false;
-            }
-            else {
-                return true;
-            }
+            bool cmp = node == r_.node;
+            if ( node == end_node and skip_end-- )
+                node = node->next;
+            return cmp;
         }
         [[nodiscard]] bool operator!= ( const_iterator const & r_ ) const noexcept { return not operator== ( r_ ); }
         [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
