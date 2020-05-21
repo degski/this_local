@@ -91,10 +91,14 @@ HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
 }
 
 template<typename T>
-inline constexpr int high_bit_index ( ) noexcept {
+inline constexpr int hi_index ( ) noexcept {
     short v = 1;
     return *reinterpret_cast<char *> ( &v ) ? sizeof ( T ) - 1 : 0;
 }
+
+[[nodiscard]] inline constexpr bool is_little_endian ( ) noexcept { return hi_index<short> ( ); }
+
+inline bool const LITTLE_ENDIAN = is_little_endian ( );
 
 [[nodiscard]] bool has_thread_exited ( std::thread::native_handle_type handle_ ) noexcept {
 #if defined( _MSC_VER )
@@ -110,9 +114,51 @@ inline constexpr int high_bit_index ( ) noexcept {
 }
 
 struct alignas ( 16 ) uint128_t {
+#if LITTLE_ENDIAN
     long long lo;
     long long hi;
+#else
+    long long hi;
+    long long lo;
+#endif
 };
+
+struct alignas ( 32 ) uint256_t {
+#if LITTLE_ENDIAN
+    uint128_t lo;
+    uint128_t hi;
+#else
+    uint128_t hi;
+    uint128_t lo;
+#endif
+};
+
+struct alignas ( 64 ) uint512_t {
+#if LITTLE_ENDIAN
+    uint256_t lo;
+    uint256_t hi;
+#else
+    uint256_t hi;
+    uint256_t lo;
+#endif
+};
+
+template<typename T>
+using pun_type = std::conditional_t<
+    sizeof ( T ) == 64, uint512_t,
+    std::conditional_t<
+        sizeof ( T ) == 32, uint256_t,
+        std::conditional_t<sizeof ( T ) == 16, uint128_t,
+                           std::conditional_t<sizeof ( T ) == 8, uint64_t,
+                                              std::conditional_t<sizeof ( T ) == 4, uint32_t,
+                                                                 std::conditional_t<sizeof ( T ) == 2, uint16_t, uint8_t>>>>>>;
+
+template<typename T>
+[[nodiscard]] inline pun_type<T> pun_for_fun ( void const * const t_ ) noexcept {
+    pun_type<T> t;
+    std::memcpy ( &t, t_, sizeof ( pun_type<T> ) );
+    return t;
+}
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( volatile sax::uint128_t & dest_, sax::uint128_t ex_new_,
                                                 sax::uint128_t & cr_old_ ) noexcept {
@@ -525,7 +571,7 @@ class lock_free_plf_list final {
     }
 
     HEDLEY_ALWAYS_INLINE void store_sentinel ( node_ptr p_, counted_link l_, unsigned char aba_id_ = 0 ) noexcept {
-        std::memcpy ( reinterpret_cast<char *> ( &p_ ) + high_bit_index<node_ptr> ( ), &aba_id_, 1 );
+        std::memcpy ( reinterpret_cast<char *> ( &p_ ) + hi_index<node_ptr> ( ), &aba_id_, 1 );
         sentinel.store ( { std::forward<counted_link> ( l_ ), std::forward<node_ptr> ( p_ ) }, std::memory_order_relaxed );
     }
 
@@ -533,12 +579,12 @@ class lock_free_plf_list final {
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
         node_ptr new_node       = &*it_;
         counted_node_link old   = sentinel.load ( std::memory_order_relaxed );
-        unsigned char new_aba   = std::exchange ( *( reinterpret_cast<char *> ( &old.node ) + high_bit_index<node_ptr> ( ) ), 0 )++;
+        unsigned char new_aba   = std::exchange ( *( reinterpret_cast<char *> ( &old.node ) + hi_index<node_ptr> ( ) ), 0 )++;
         *counted_link::new_node = { old.node, old.node->next };
         store_sentinel ( new_node, { old.node->prev, new_node }, new_aba );
         while ( not dwcas ( *counted_link::old.node, sentinel.load ( std::memory_order_relaxed ), *counted_link::new_node ) ) {
             old = sentinel.load ( std::memory_order_relaxed );
-            std::memset ( reinterpret_cast<char *> ( &old.node ) + high_bit_index<node_ptr> ( ), 0, 1 );
+            std::memset ( reinterpret_cast<char *> ( &old.node ) + hi_index<node_ptr> ( ), 0, 1 );
             *counted_link::new_node = { old.node, old.node->next };
             if constexpr ( std::is_same<at::front, At>::value )
                 store_sentinel ( old.node, { old.node->prev, new_node }, new_aba );
