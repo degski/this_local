@@ -80,14 +80,25 @@
 
 namespace sax {
 
-HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
-#if ( defined( __clang__ ) or defined( __GNUC__ ) )
-    asm( "pause" );
-#elif defined( _MSC_VER )
-    _mm_pause ( );
+[[nodiscard]] bool has_thread_exited ( std::thread::native_handle_type handle_ ) noexcept {
+#if defined( _MSC_VER )
+    FILETIME creationTime;
+    FILETIME exitTime = { 0, 0 };
+    FILETIME kernelTime;
+    FILETIME userTime;
+    GetThreadTimes ( handle_, &creationTime, &exitTime, &kernelTime, &userTime );
+    return exitTime.dwLowDateTime;
 #else
-#    error support for the babbage engine has ended
+
 #endif
+}
+
+template<typename T>
+[[nodiscard]] static constexpr std::uint16_t abbreviate_pointer ( T const * pointer_ ) noexcept {
+    ( std::uintptr_t ) pointer_ >>= ilog2 ( alignof ( T ) );          // strip lower bits
+    ( std::uintptr_t ) pointer_ ^= ( std::uintptr_t ) pointer_ >> 32; // fold high into low
+    ( std::uintptr_t ) pointer_ ^= ( std::uintptr_t ) pointer_ >> 16; // fold high into low
+    return ( std::uint16_t ) ( std::uintptr_t ) pointer_;
 }
 
 template<typename T>
@@ -100,17 +111,24 @@ inline constexpr int hi_index ( ) noexcept {
 
 inline bool const LITTLE_ENDIAN = is_little_endian ( );
 
-[[nodiscard]] bool has_thread_exited ( std::thread::native_handle_type handle_ ) noexcept {
-#if defined( _MSC_VER )
-    FILETIME creationTime;
-    FILETIME exitTime = { 0, 0 };
-    FILETIME kernelTime;
-    FILETIME userTime;
-    GetThreadTimes ( handle_, &creationTime, &exitTime, &kernelTime, &userTime );
-    return exitTime.dwLowDateTime;
-#else
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m64 ( void const * const a_, void const * const b_ ) noexcept {
+    std::uint64_t a;
+    std::memcpy ( &a, a_, 8 );
+    std::uint64_t b;
+    std::memcpy ( &b, b_, 8 );
+    return a == b;
+}
 
-#endif
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m128 ( void const * const a_, void const * const b_ ) noexcept {
+    return 0xF == _mm_movemask_ps ( _mm_cmpeq_ps ( _mm_load_ps ( ( float * ) a_ ), _mm_load_ps ( ( float * ) b_ ) ) );
+}
+
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m256 ( void const * const a_, void const * const b_ ) noexcept {
+    return equal_m128 ( a_, b_ ) and equal_m128 ( ( char const * const ) a_ + 16, ( char const * const ) b_ + 16 );
+}
+
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m512 ( void const * const a_, void const * const b_ ) noexcept {
+    return equal_m256 ( a_, b_ ) and equal_m256 ( ( char const * const ) a_ + 32, ( char const * const ) b_ + 32 );
 }
 
 struct alignas ( 16 ) uint128_t {
@@ -160,8 +178,27 @@ template<typename T>
     return t;
 }
 
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( volatile sax::uint128_t & dest_, sax::uint128_t ex_new_,
-                                                sax::uint128_t & cr_old_ ) noexcept {
+// Algorithms built around CAS typically read some key memory location and remember the old value. Based on that old value, they
+// compute some new value. Then they try to swap in the new value using CAS, where the comparison checks for the location still
+// being equal to the old value. If CAS indicates that the attempt has failed, it has to be repeated from the beginning: the
+// location is re-read, a new value is re-computed and the CAS is tried again. Instead of immediately retrying after a CAS
+// operation fails, researchers have found that total system performance can be improved in multiprocessor systems—where many
+// threads constantly update some particular shared variable if threads that see their CAS fail use exponential backoff, in
+// other words, wait a little before retrying the CAS.
+
+template<typename MutexType>
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool soft_dwcas ( uint128_t & dest_, uint128_t ex_new_, uint128_t & cr_old_ ) noexcept {
+    alignas ( 64 ) static MutexType cas_mutex;
+    std::scoped_lock lock ( cas_mutex );
+    bool check = not equal_m128 ( &dest_, &cr_old_ );
+    std::memcpy ( &cr_old_, &dest_, 16 );
+    if ( check )
+        return false;
+    std::memcpy ( &dest_, &ex_new_, 16 );
+    return true;
+}
+
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( volatile uint128_t & dest_, uint128_t ex_new_, uint128_t & cr_old_ ) noexcept {
 #if ( defined( __clang__ ) or defined( __GNUC__ ) )
     bool value;
     __asm__ __volatile__( "lock cmpxchg16b %1\n\t"
@@ -176,39 +213,6 @@ template<typename T>
 #endif
 }
 
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m64 ( void const * const a_, void const * const b_ ) noexcept {
-    std::uint64_t a;
-    std::memcpy ( &a, a_, 8 );
-    std::uint64_t b;
-    std::memcpy ( &b, b_, 8 );
-    return a == b;
-}
-
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m128 ( void const * const a_, void const * const b_ ) noexcept {
-    return 0xF == _mm_movemask_ps ( _mm_cmpeq_ps ( _mm_load_ps ( ( float * ) a_ ), _mm_load_ps ( ( float * ) b_ ) ) );
-}
-
-// Algorithms built around CAS typically read some key memory location and remember the old value. Based on that old value, they
-// compute some new value. Then they try to swap in the new value using CAS, where the comparison checks for the location still
-// being equal to the old value. If CAS indicates that the attempt has failed, it has to be repeated from the beginning: the
-// location is re-read, a new value is re-computed and the CAS is tried again. Instead of immediately retrying after a CAS
-// operation fails, researchers have found that total system performance can be improved in multiprocessor systems—where many
-// threads constantly update some particular shared variable if threads that see their CAS fail use exponential backoff, in
-// other words, wait a little before retrying the CAS.
-
-template<typename MutexType>
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool soft_dwcas ( sax::uint128_t & dest_, sax::uint128_t ex_new_,
-                                                     sax::uint128_t & cr_old_ ) noexcept {
-    alignas ( 64 ) static MutexType cas_mutex;
-    std::scoped_lock lock ( cas_mutex );
-    bool check = not equal_m128 ( &dest_, &cr_old_ );
-    std::memcpy ( &cr_old_, &dest_, 16 );
-    if ( check )
-        return false;
-    std::memcpy ( &dest_, &ex_new_, 16 );
-    return true;
-}
-
 [[nodiscard]] static constexpr int ilog2 ( std::uint64_t v_ ) noexcept {
     int c = !!v_;
     while ( v_ >>= 1 )
@@ -216,13 +220,14 @@ template<typename MutexType>
     return c;
 }
 
-template<typename T>
-[[nodiscard]] static constexpr std::uint16_t abbreviate_pointer ( T const * pointer_ ) noexcept {
-    std::uintptr_t a = ( std::uintptr_t ) pointer_;
-    a >>= ilog2 ( alignof ( T ) ); // strip lower bits
-    a ^= a >> 32;                  // fold high over low
-    a ^= a >> 16;                  // fold high over low
-    return ( std::uint16_t ) a;
+HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
+#if ( defined( __clang__ ) or defined( __GNUC__ ) )
+    asm( "pause" );
+#elif defined( _MSC_VER )
+    _mm_pause ( );
+#else
+#    error support for the babbage engine has ended
+#endif
 }
 
 // Never NULL ttas rw spin-lock.
