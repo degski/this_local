@@ -483,9 +483,9 @@ class lock_free_plf_list final {
 
     private:
     alignas ( 64 ) std::atomic<counted_node_link> sentinel; // the work-horse
-    counted_link end_link;
 
     nodes_type nodes;
+    counted_node_link end_link;
     nodes_iterator ( lock_free_plf_list::*insert_front_implementation ) ( nodes_iterator && ) noexcept;
     nodes_iterator ( lock_free_plf_list::*insert_back_implementation ) ( nodes_iterator && ) noexcept;
 
@@ -548,7 +548,7 @@ class lock_free_plf_list final {
         std::scoped_lock lock ( instance );
         node_ptr new_node       = &*it_;
         *counted_link::new_node = { &end_link, &end_link, 1 };
-        end_link.prev = end_link.next = counted_link::new_node;
+        end_link                = { counted_link::new_node, counted_link::new_node, nullptr };
         if constexpr ( std::is_same<at::front, At>::value ) {
             store_sentinel ( &end_link, { &end_link, &end_link }, 1 );
             insert_front_implementation = &lock_free_plf_list::insert_regular_implementation<at::front>;
