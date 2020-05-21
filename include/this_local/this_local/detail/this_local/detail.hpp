@@ -448,8 +448,9 @@ alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_stack<T, Allocator>::global
 
 alignas ( 64 ) inline static spin_rw_lock<long long> global_mutex;
 
+namespace lockless {
 template<typename T, typename Allocator = std::allocator<T>, typename DefaultInsertionMode = at::back>
-class lockless_unbounded_circular_list final {
+class unbounded_circular_list final {
 
     public:
     using value_type      = T;
@@ -543,24 +544,25 @@ class lockless_unbounded_circular_list final {
 
     nodes_type nodes;
     counted_node_link end_link;
-    nodes_iterator ( lockless_unbounded_circular_list::*insert_front_implementation ) ( nodes_iterator && ) noexcept;
-    nodes_iterator ( lockless_unbounded_circular_list::*insert_back_implementation ) ( nodes_iterator && ) noexcept;
+    nodes_iterator ( unbounded_circular_list::*insert_front_implementation ) ( nodes_iterator && ) noexcept;
+    nodes_iterator ( unbounded_circular_list::*insert_back_implementation ) ( nodes_iterator && ) noexcept;
 
     // constructors (insert at the back)
 
     public:
-    lockless_unbounded_circular_list ( ) :
-        insert_front_implementation{ &lockless_unbounded_circular_list::insert_init_implementation<at::front> },
-        insert_back_implementation{ &lockless_unbounded_circular_list::insert_init_implementation<at::back> } {}
+    unbounded_circular_list ( ) :
+        insert_front_implementation{ &unbounded_circular_list::insert_init_implementation<at::front> }, insert_back_implementation{
+            &unbounded_circular_list::insert_init_implementation<at::back>
+        } {}
 
-    lockless_unbounded_circular_list ( value_type const & data_ ) {
+    unbounded_circular_list ( value_type const & data_ ) {
         insert_init_implementation<DefaultInsertionMode> ( nodes.emplace ( data_ ) );
     }
-    lockless_unbounded_circular_list ( value_type && data_ ) {
+    unbounded_circular_list ( value_type && data_ ) {
         insert_init_implementation<DefaultInsertionMode> ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
-    lockless_unbounded_circular_list ( Args &&... args_ ) {
+    unbounded_circular_list ( Args &&... args_ ) {
         insert_init_implementation<DefaultInsertionMode> ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
@@ -612,11 +614,11 @@ class lockless_unbounded_circular_list final {
         end_link                = { counted_link::new_node, counted_link::new_node, nullptr };
         if constexpr ( std::is_same<at::front, At>::value ) {
             store_sentinel ( &end_link, { &end_link, &end_link }, 1 );
-            insert_front_implementation = &lockless_unbounded_circular_list::insert_regular_implementation<at::front>;
+            insert_front_implementation = &unbounded_circular_list::insert_regular_implementation<at::front>;
         }
         else {
             store_sentinel ( new_node, { &end_link, &end_link }, 1 );
-            insert_back_implementation = &lockless_unbounded_circular_list::insert_regular_implementation<at::back>;
+            insert_back_implementation = &unbounded_circular_list::insert_regular_implementation<at::back>;
         }
         return std::forward<nodes_iterator> ( it_ );
     }
@@ -666,7 +668,7 @@ class lockless_unbounded_circular_list final {
 
     class alignas ( 16 ) iterator final {
 
-        friend class lockless_unbounded_circular_list;
+        friend class unbounded_circular_list;
 
         node_ptr node, end_node;
         long long skip_end; // will throw on (negative-) overflow, not handled
@@ -715,7 +717,7 @@ class lockless_unbounded_circular_list final {
 
     class alignas ( 16 ) const_iterator final {
 
-        friend class lockless_unbounded_circular_list;
+        friend class unbounded_circular_list;
 
         mutable const_node_ptr node;
         const_node_ptr end_node;
@@ -858,12 +860,14 @@ class lockless_unbounded_circular_list final {
     }
 
     template<typename Stream>
-    [[maybe_unused]] friend Stream & operator<< ( Stream & out_, lockless_unbounded_circular_list const & list_ ) noexcept {
+    [[maybe_unused]] friend Stream & operator<< ( Stream & out_, unbounded_circular_list const & list_ ) noexcept {
         return list_.ostream ( out_ );
     }
 
     static constexpr int offset_data = static_cast<int> ( offsetof ( node, data ) );
-}; // namespace sax
+};
+
+} // namespace lockless
 
 template<typename Stream>
 [[maybe_unused]] Stream & operator<< ( Stream & out_, uint128_t const & i_ ) noexcept {
