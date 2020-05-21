@@ -703,19 +703,19 @@ class unbounded_circular_list final {
         ~iterator ( ) = default;
 
         [[maybe_unused]] iterator & operator++ ( ) noexcept {
+            if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
+                node = node->next;
             node = node->next;
             return *this;
         }
         [[maybe_unused]] iterator & operator-- ( ) noexcept {
+            if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
+                node = node->prev;
             node = node->prev;
             return *this;
         }
 
-        [[nodiscard]] bool operator== ( iterator const & r_ ) const noexcept {
-            if ( node == end_node and skip_end-- )
-                node = node->next;
-            return node == r_.node;
-        }
+        [[nodiscard]] bool operator== ( iterator const & r_ ) const noexcept { return node == r_.node; }
         [[nodiscard]] bool operator!= ( iterator const & r_ ) const noexcept { return not operator== ( r_ ); }
         [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
         [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
@@ -753,19 +753,19 @@ class unbounded_circular_list final {
         ~const_iterator ( ) = default;
 
         [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
+            if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
+                node = node->next;
             node = node->next;
             return *this;
         }
         [[maybe_unused]] const_iterator & operator-- ( ) noexcept {
+            if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
+                node = node->prev;
             node = node->prev;
             return *this;
         }
 
-        [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept {
-            if ( node == end_node and skip_end-- )
-                node = node->next;
-            return node == r_.node;
-        }
+        [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept { return node == r_.node; }
         [[nodiscard]] bool operator!= ( const_iterator const & r_ ) const noexcept { return not operator== ( r_ ); }
         [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
         [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
