@@ -216,7 +216,7 @@ int main ( ) {
 
     constexpr int N = 4;
 
-    sax::lock_free_plf_list<int> list;
+    sax::concurrent_circular_list<int> list;
 
     list.emplace ( 0 );
     list.ostream ( std::cout );
@@ -237,7 +237,7 @@ int main ( ) {
     timer.start ( );
 
     for ( int n = 0; n < N; ++n )
-        std::jthread{ work<sax::lock_free_plf_list<int>>, std::ref ( stk ) };
+        std::jthread{ work<sax::concurrent_circular_list<int>>, std::ref ( stk ) };
 
     duration = static_cast<std::uint64_t> ( timer.get_elapsed_ms ( ) );
 

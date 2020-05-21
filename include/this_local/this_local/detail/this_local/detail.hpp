@@ -449,7 +449,7 @@ alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_stack<T, Allocator>::global
 alignas ( 64 ) inline static spin_rw_lock<long long> global_mutex;
 
 template<typename T, typename Allocator = std::allocator<T>>
-class lock_free_plf_list final {
+class concurrent_circular_list final {
 
     public:
     using value_type      = T;
@@ -543,23 +543,23 @@ class lock_free_plf_list final {
 
     nodes_type nodes;
     counted_node_link end_link;
-    nodes_iterator ( lock_free_plf_list::*insert_front_implementation ) ( nodes_iterator && ) noexcept;
-    nodes_iterator ( lock_free_plf_list::*insert_back_implementation ) ( nodes_iterator && ) noexcept;
+    nodes_iterator ( concurrent_circular_list::*insert_front_implementation ) ( nodes_iterator && ) noexcept;
+    nodes_iterator ( concurrent_circular_list::*insert_back_implementation ) ( nodes_iterator && ) noexcept;
 
     // constructors
 
     public:
-    lock_free_plf_list ( ) :
-        insert_front_implementation{ &lock_free_plf_list::insert_init_implementation }, insert_back_implementation{
-            &lock_free_plf_list::insert_init_implementation
+    concurrent_circular_list ( ) :
+        insert_front_implementation{ &concurrent_circular_list::insert_init_implementation }, insert_back_implementation{
+            &concurrent_circular_list::insert_init_implementation
         } {}
 
-    lock_free_plf_list ( value_type const & data_ ) { insert_init_implementation ( nodes.emplace ( data_ ) ); }
-    lock_free_plf_list ( value_type && data_ ) {
+    concurrent_circular_list ( value_type const & data_ ) { insert_init_implementation ( nodes.emplace ( data_ ) ); }
+    concurrent_circular_list ( value_type && data_ ) {
         insert_init_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
-    lock_free_plf_list ( Args &&... args_ ) {
+    concurrent_circular_list ( Args &&... args_ ) {
         insert_init_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
@@ -608,11 +608,11 @@ class lock_free_plf_list final {
         end_link                = { counted_link::new_node, counted_link::new_node, nullptr };
         if constexpr ( std::is_same<at::front, At>::value ) {
             store_sentinel ( &end_link, { &end_link, &end_link }, 1 );
-            insert_front_implementation = &lock_free_plf_list::insert_regular_implementation<at::front>;
+            insert_front_implementation = &concurrent_circular_list::insert_regular_implementation<at::front>;
         }
         else {
             store_sentinel ( new_node, { &end_link, &end_link }, 1 );
-            insert_back_implementation = &lock_free_plf_list::insert_regular_implementation<at::back>;
+            insert_back_implementation = &concurrent_circular_list::insert_regular_implementation<at::back>;
         }
         return std::forward<nodes_iterator> ( it_ );
     }
@@ -649,7 +649,7 @@ class lock_free_plf_list final {
 
     class alignas ( 16 ) iterator final {
 
-        friend class lock_free_plf_list;
+        friend class concurrent_circular_list;
 
         node_ptr node, end_node;
         long long skip_end; // will throw on (negative-) overflow, not handled
@@ -698,7 +698,7 @@ class lock_free_plf_list final {
 
     class alignas ( 16 ) const_iterator final {
 
-        friend class lock_free_plf_list;
+        friend class concurrent_circular_list;
 
         mutable const_node_ptr node;
         const_node_ptr end_node;
@@ -841,7 +841,7 @@ class lock_free_plf_list final {
     }
 
     template<typename Stream>
-    [[maybe_unused]] friend Stream & operator<< ( Stream & out_, lock_free_plf_list const & list_ ) noexcept {
+    [[maybe_unused]] friend Stream & operator<< ( Stream & out_, concurrent_circular_list const & list_ ) noexcept {
         return list_.ostream ( out_ );
     }
 
