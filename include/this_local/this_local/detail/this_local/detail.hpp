@@ -41,6 +41,7 @@
 #    include <windef.h>
 #    include <WinBase.h>
 #    include <emmintrin.h>
+#    include <immintrin.h>
 
 #    ifdef WIN32_LEAN_AND_MEAN_DEFINED
 #        undef WIN32_LEAN_AND_MEAN_DEFINED
@@ -53,6 +54,7 @@
 #else
 
 #    include <emmintrin.h>
+#    include <immintrin.h>
 
 #endif
 
@@ -123,8 +125,17 @@ inline bool const LITTLE_ENDIAN = is_little_endian ( );
     return 0xF == _mm_movemask_ps ( _mm_cmpeq_ps ( _mm_load_ps ( ( float * ) a_ ), _mm_load_ps ( ( float * ) b_ ) ) );
 }
 
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m192 ( void const * const a_, void const * const b_ ) noexcept {
+    __m256i a = _mm256_insert_epi64 ( _mm256_cmpeq_epi64 ( _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) a_ ) ),
+                                                           _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) b_ ) ) ),
+                                      ~0ll, 3 );
+    return 0xF == _mm256_movemask_pd ( _mm256_castsi256_pd ( a ) );
+}
+
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m256 ( void const * const a_, void const * const b_ ) noexcept {
-    return equal_m128 ( a_, b_ ) and equal_m128 ( ( char const * const ) a_ + 16, ( char const * const ) b_ + 16 );
+    __m256i a = _mm256_cmpeq_epi64 ( _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) a_ ) ),
+                                     _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) b_ ) ) );
+    return 0xF == _mm256_movemask_pd ( _mm256_castsi256_pd ( a ) );
 }
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m512 ( void const * const a_, void const * const b_ ) noexcept {
@@ -666,11 +677,11 @@ class unbounded_circular_list final {
         return ( this->*insert_front_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
-    class alignas ( 16 ) iterator final {
+    class alignas ( 32 ) iterator final {
 
         friend class unbounded_circular_list;
 
-        node_ptr node, end_node;
+        node_ptr node, end_node, rhs_node;
         long long skip_end; // will throw on (negative-) overflow, not handled
 
         iterator ( node_ptr node_, node_ptr end_node_, long long end_passes_ ) noexcept :
@@ -715,12 +726,12 @@ class unbounded_circular_list final {
         [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
     };
 
-    class alignas ( 16 ) const_iterator final {
+    class alignas ( 32 ) const_iterator final {
 
         friend class unbounded_circular_list;
 
         mutable const_node_ptr node;
-        const_node_ptr end_node;
+        const_node_ptr end_node, rhs_node;
         mutable long long skip_end; // will throw on (negative-) overflow, not handled
 
         const_iterator ( const_node_ptr node_, const_node_ptr end_node_, long long end_passes_ ) noexcept :
