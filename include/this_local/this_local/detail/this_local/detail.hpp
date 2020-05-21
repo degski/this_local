@@ -615,23 +615,26 @@ class lock_free_plf_list final {
 
         [[maybe_unused]] iterator & operator++ ( ) noexcept {
             node = node->next;
-            if ( node == end_node and skip_end ) {
-                node = node->next;
-                skip_end -= 1;
-            }
             return *this;
         }
         [[maybe_unused]] iterator & operator-- ( ) noexcept {
             node = node->prev;
-            if ( node == end_node and skip_end ) {
-                node = node->prev;
-                skip_end -= 1;
-            }
             return *this;
         }
 
-        [[nodiscard]] bool operator== ( iterator const & r_ ) const noexcept { return node == r_.node; }
-        [[nodiscard]] bool operator!= ( iterator const & r_ ) const noexcept { return node != r_.node; }
+        [[nodiscard]] bool operator== ( iterator const & r_ ) const noexcept {
+            if ( node != r_.node ) {
+                if ( node == end_node and skip_end-- ) {
+                    node = node->next;
+                    return node == r_.node;
+                }
+                return false;
+            }
+            else {
+                return true;
+            }
+        }
+        [[nodiscard]] bool operator!= ( iterator const & r_ ) const noexcept { return not operator== ( r_ ); }
         [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
         [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
     };
@@ -640,8 +643,9 @@ class lock_free_plf_list final {
 
         friend class lock_free_plf_list;
 
-        const_node_ptr node, end_node;
-        long long skip_end; // will throw on (negative-) overflow, not handled
+        mutable const_node_ptr node;
+        const_node_ptr end_node;
+        mutable long long skip_end; // will throw on (negative-) overflow, not handled
 
         const_iterator ( const_node_ptr node_, const_node_ptr end_node_, long long end_passes_ ) noexcept :
             node{ std::forward<const_node_ptr> ( node_ ) }, end_node{ std::forward<const_node_ptr> ( end_node_ ) }, skip_end{
@@ -668,23 +672,26 @@ class lock_free_plf_list final {
 
         [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
             node = node->next;
-            if ( node == end_node and skip_end ) {
-                node = node->next;
-                skip_end -= 1;
-            }
             return *this;
         }
         [[maybe_unused]] const_iterator & operator-- ( ) noexcept {
             node = node->prev;
-            if ( node == end_node and skip_end ) {
-                node = node->prev;
-                skip_end -= 1;
-            }
             return *this;
         }
 
-        [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept { return node == r_.node; }
-        [[nodiscard]] bool operator!= ( const_iterator const & r_ ) const noexcept { return node != r_.node; }
+        [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept {
+            if ( node != r_.node ) {
+                if ( node == end_node and skip_end-- ) {
+                    node = node->next;
+                    return node == r_.node;
+                }
+                return false;
+            }
+            else {
+                return true;
+            }
+        }
+        [[nodiscard]] bool operator!= ( const_iterator const & r_ ) const noexcept { return not operator== ( r_ ); }
         [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
         [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
     };
