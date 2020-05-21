@@ -596,7 +596,8 @@ class unbounded_circular_list final {
 
     template<typename At>
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
-        node_ptr new_node       = &*it_;
+        node_ptr new_node = &*it_;
+        // the body of the cas loop un-rolled once (same as below)
         counted_node_link old   = sentinel.load ( std::memory_order_relaxed );
         unsigned char new_aba   = std::exchange ( *( reinterpret_cast<char *> ( &old.node ) + hi_index<node_ptr> ( ) ), 0 )++;
         *counted_link::new_node = { old.node, old.node->next };
@@ -604,6 +605,7 @@ class unbounded_circular_list final {
             store_sentinel ( old.node, { old.node->prev, new_node }, new_aba );
         else
             store_sentinel ( new_node, { old.node->prev, new_node }, new_aba );
+        // end of un-rolled loop
         while ( not dwcas ( *counted_link::old.node, sentinel.load ( std::memory_order_relaxed ), *counted_link::new_node ) ) {
             old = sentinel.load ( std::memory_order_relaxed );
             std::memset ( reinterpret_cast<char *> ( &old.node ) + hi_index<node_ptr> ( ), 0, 1 );
@@ -677,11 +679,11 @@ class unbounded_circular_list final {
         return ( this->*insert_front_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
-    class alignas ( 32 ) iterator final {
+    class alignas ( 16 ) iterator final {
 
         friend class unbounded_circular_list;
 
-        node_ptr node, end_node, rhs_node;
+        node_ptr node, end_node;
         long long skip_end; // will throw on (negative-) overflow, not handled
 
         iterator ( node_ptr node_, node_ptr end_node_, long long end_passes_ ) noexcept :
@@ -726,12 +728,12 @@ class unbounded_circular_list final {
         [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
     };
 
-    class alignas ( 32 ) const_iterator final {
+    class alignas ( 16 ) const_iterator final {
 
         friend class unbounded_circular_list;
 
         mutable const_node_ptr node;
-        const_node_ptr end_node, rhs_node;
+        const_node_ptr end_node;
         mutable long long skip_end; // will throw on (negative-) overflow, not handled
 
         const_iterator ( const_node_ptr node_, const_node_ptr end_node_, long long end_passes_ ) noexcept :
