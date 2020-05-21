@@ -90,9 +90,10 @@ HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
 #endif
 }
 
+template<typename T>
 inline constexpr int high_bit_index ( ) noexcept {
     short v = 1;
-    return *reinterpret_cast<char *> ( &v ) ? 7 : 0;
+    return *reinterpret_cast<char *> ( &v ) ? sizeof ( T ) - 1 : 0;
 }
 
 [[nodiscard]] bool has_thread_exited ( std::thread::native_handle_type handle_ ) noexcept {
@@ -524,7 +525,7 @@ class lock_free_plf_list final {
     }
 
     HEDLEY_ALWAYS_INLINE void store_sentinel ( node_ptr p_, counted_link l_, unsigned char aba_id_ = 0 ) noexcept {
-        std::memcpy ( reinterpret_cast<char *> ( &p_ ) + high_bit_index ( ), &aba_id_, 1 );
+        std::memcpy ( reinterpret_cast<char *> ( &p_ ) + high_bit_index<node_ptr> ( ), &aba_id_, 1 );
         sentinel.store ( { std::forward<counted_link> ( l_ ), std::forward<node_ptr> ( p_ ) }, std::memory_order_relaxed );
     }
 
@@ -532,12 +533,12 @@ class lock_free_plf_list final {
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
         node_ptr new_node       = &*it_;
         counted_node_link old   = sentinel.load ( std::memory_order_relaxed );
-        unsigned char new_aba   = std::exchange ( *( reinterpret_cast<char *> ( &old.node ) + high_bit_index ( ) ), 0 )++;
+        unsigned char new_aba   = std::exchange ( *( reinterpret_cast<char *> ( &old.node ) + high_bit_index<node_ptr> ( ) ), 0 )++;
         *counted_link::new_node = { old.node, old.node->next };
         store_sentinel ( new_node, { old.node->prev, new_node }, new_aba );
         while ( not dwcas ( *counted_link::old.node, sentinel.load ( std::memory_order_relaxed ), *counted_link::new_node ) ) {
             old = sentinel.load ( std::memory_order_relaxed );
-            std::memset ( reinterpret_cast<char *> ( &old.node ) + high_bit_index ( ), 0, 1 );
+            std::memset ( reinterpret_cast<char *> ( &old.node ) + high_bit_index<node_ptr> ( ), 0, 1 );
             *counted_link::new_node = { old.node, old.node->next };
             if constexpr ( std::is_same<at::front, At>::value )
                 store_sentinel ( old.node, { old.node->prev, new_node }, new_aba );
