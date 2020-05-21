@@ -703,15 +703,15 @@ class unbounded_circular_list final {
         ~iterator ( ) = default;
 
         [[maybe_unused]] iterator & operator++ ( ) noexcept {
+            node = node->next;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
                 node = node->next;
-            node = node->next;
             return *this;
         }
         [[maybe_unused]] iterator & operator-- ( ) noexcept {
+            node = node->prev;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
                 node = node->prev;
-            node = node->prev;
             return *this;
         }
 
@@ -752,15 +752,15 @@ class unbounded_circular_list final {
         ~const_iterator ( ) = default;
 
         [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
+            node = node->next;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
                 node = node->next;
-            node = node->next;
             return *this;
         }
         [[maybe_unused]] const_iterator & operator-- ( ) noexcept {
+            node = node->prev;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
                 node = node->prev;
-            node = node->prev;
             return *this;
         }
 
