@@ -200,12 +200,18 @@ int main5686780 ( ) {
 
 int main ( ) {
 
-    std::vector<long long> a ( 4, ~0 );
-    std::vector<long long> b ( 4, 0 );
+    auto a = _mm_set_ps ( 0.0, 0.0, 0.0, 0.0 );
+    auto b = _mm_set_ps ( 0.0, 1.0, 0.0, 0.0 );
 
-    std::cout << sax::equal_m128 ( a.data ( ), b.data ( ) ) << nl;
-    std::cout << sax::equal_m192 ( a.data ( ), b.data ( ) ) << nl;
-    std::cout << sax::equal_m192 ( a.data ( ), b.data ( ) ) << nl;
+    std::cout << sax::equal_m128 ( &a, &b ) << ' ';
+
+    auto c = _mm_set_ps ( 0.0, 0.0, 0.0, 1.0 );
+
+    std::cout << sax::equal_m128 ( &a, &c ) << nl;
+
+    std::cout << sax::equal_m192 ( &a, &b ) << nl;
+
+    //  std::cout << sax::equal_m192 ( a.data ( ), b.data ( ) ) << nl;
 
     // for ( std::size_t i = 0; i < 256; ++i ) {
 
