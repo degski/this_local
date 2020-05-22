@@ -133,49 +133,28 @@ inline bool const LITTLE_ENDIAN = is_little_endian ( );
     std::memcpy ( &b, b_, sizeof ( b ) );
     return a == b;
 }
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m64 ( void const * const a_, void const * const b_ ) noexcept {
-    return not equal_m64 ( a_, b_ );
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m128 ( void const * const a_, void const * const b_ ) noexcept {
+    return not _mm_movemask_pd ( _mm_cmpneq_pd ( _mm_load_pd ( ( double * ) a_ ), _mm_load_pd ( ( double * ) b_ ) ) );
+}
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m192 ( void const * const a_, void const * const b_ ) noexcept {
+    // https://godbolt.org/z/efTuAz https://godbolt.org/z/XQYNzT
+    if ( not equal_m128 ( a_, b_ ) )
+        return false;
+    return *( ( std::uintptr_t * ) a_ + 2 ) == *( ( std::uintptr_t * ) b_ + 2 );
+}
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m256 ( void const * const a_, void const * const b_ ) noexcept {
+    return not _mm256_movemask_pd (
+        _mm256_cmp_pd ( _mm256_load_pd ( ( double const * ) a_ ), _mm256_load_pd ( ( double const * ) b_ ), 1 ) );
 }
 
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m128 ( void const * const a_, void const * const b_ ) noexcept {
-    return not _mm_movemask_ps ( _mm_cmpneq_ps ( _mm_load_ps ( ( float * ) a_ ), _mm_load_ps ( ( float * ) b_ ) ) );
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m64 ( void const * const a_, void const * const b_ ) noexcept {
+    return not equal_m64 ( a_, b_ );
 }
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m128 ( void const * const a_, void const * const b_ ) noexcept {
     return not equal_m128 ( a_, b_ );
 }
-
-/*
-
-    __m128i vcmp  = ( __m128i ) _mm_cmpneq_ps ( a, b ); // compare a, b for inequality
-    uint16_t test = _mm_movemask_epi8 ( vcmp );         // extract results of comparison
-    if ( test == 0xffff )
-        // *all* elements not equal
-        else if ( test != 0 )
-            // *some* elements not equal
-            else
-            // no elements not equal, i.e. all elements equal
-
-*/
-
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m192 ( void const * const a_, void const * const b_ ) noexcept {
-    // https://godbolt.org/z/efTuAz https://godbolt.org/z/XQYNzT
-    __m128d c0 = _mm_setzero_pd ( ), c1 = _mm_setzero_pd ( ), c2 = _mm_setzero_pd ( );
-    _mm_loadl_pd ( c0, ( double const * ) a_ + 0 );
-    _mm_loadl_pd ( c1, ( double const * ) a_ + 1 );
-    _mm_loadl_pd ( c2, ( double const * ) a_ + 2 );
-    _mm_loadh_pd ( c0, ( double const * ) b_ + 0 );
-    _mm_loadh_pd ( c1, ( double const * ) b_ + 1 );
-    _mm_loadh_pd ( c2, ( double const * ) b_ + 2 );
-    return ( not _mm_movemask_ps ( _mm_cmpneq_ps ( _mm_castpd_ps ( c0 ), _mm_castpd_ps ( c1 ) ) ) ) and
-           ( not _mm_movemask_ps ( _mm_cmpneq_ps ( _mm_castpd_ps ( c1 ), _mm_castpd_ps ( c2 ) ) ) );
-}
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m192 ( void const * const a_, void const * const b_ ) noexcept {
     return not equal_m192 ( a_, b_ );
-}
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m256 ( void const * const a_, void const * const b_ ) noexcept {
-    __m256i a = _mm256_cmpeq_epi64 ( _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) a_ ) ),
-                                     _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) b_ ) ) );
-    return _mm256_movemask_pd ( _mm256_castsi256_pd ( a ) );
 }
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m256 ( void const * const a_, void const * const b_ ) noexcept {
     return not equal_m256 ( a_, b_ );

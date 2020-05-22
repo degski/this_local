@@ -198,8 +198,9 @@ int main5686780 ( ) {
 
 */
 
-int main ( ) {
+int main56867567 ( ) {
 
+    /*
     auto a = _mm_set_ps ( 0.0, 0.0, 0.0, 0.0 );
     auto b = _mm_set_ps ( 0.0, 0.0, 0.0, 0.0 );
 
@@ -208,8 +209,47 @@ int main ( ) {
     auto c = _mm_set_ps ( 0.0, 0.0, 0.0, 1.0 );
 
     std::cout << sax::equal_m128 ( &a, &c ) << nl;
+    */
 
-    std::cout << sax::equal_m192 ( &a, &b ) << nl;
+    {
+        std::uint64_t a[ 3 ] = { 1, 1, 1 };
+        std::uint64_t b[ 3 ] = { 1, 1, 1 };
+
+        std::cout << sax::equal_m192 ( &a, &b ) << nl;
+    }
+
+    {
+        std::uint64_t a[ 3 ] = { 0, 1, 1 };
+        std::uint64_t b[ 3 ] = { 1, 1, 1 };
+
+        std::cout << sax::equal_m192 ( &a, &b ) << nl;
+    }
+    {
+        std::uint64_t a[ 3 ] = { 1, 0, 1 };
+        std::uint64_t b[ 3 ] = { 1, 1, 1 };
+
+        std::cout << sax::equal_m192 ( &a, &b ) << nl;
+    }
+    {
+        std::uint64_t a[ 3 ] = { 1, 1, 0 };
+        std::uint64_t b[ 3 ] = { 1, 1, 1 };
+
+        std::cout << sax::equal_m192 ( &a, &b ) << nl;
+    }
+
+    {
+        std::uint64_t a[ 3 ] = { 0, 0, 1 };
+        std::uint64_t b[ 3 ] = { 1, 1, 1 };
+
+        std::cout << sax::equal_m192 ( &a, &b ) << nl;
+    }
+
+    {
+        std::uint64_t a[ 3 ] = { 1, 0, 0 };
+        std::uint64_t b[ 3 ] = { 1, 1, 1 };
+
+        std::cout << sax::equal_m192 ( &a, &b ) << nl;
+    }
 
     //  std::cout << sax::equal_m192 ( a.data ( ), b.data ( ) ) << nl;
 
@@ -280,20 +320,23 @@ std::vector<std::uint64_t> random_vector ( std::size_t length_ ) {
     return v;
 }
 
-int main876878 ( ) {
+int main ( ) {
 
-    constexpr int N = 100'000;
+    std::array<std::uint64_t, 12> pr1 = { 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1 };
+    std::array<std::uint64_t, 12> pr2 = { 1, 2, 3, 4, 5, 6, 0, 8, 9, 10, 11, 99 };
 
-    std::vector<std::uint64_t> a = random_vector ( 12 * N ), b = { a };
+    std::array<std::uint64_t, 12> p1 = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
+    std::array<std::uint64_t, 12> p2 = { pr1 };
 
     {
+        std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
         bool result = true;
 
         std::uint64_t duration;
         plf::nanotimer timer;
         timer.start ( );
 
-        for ( std::size_t i = 0; i < 12 * N; i += 1 )
+        for ( std::size_t i = 0; i < 12; i += 1 )
             result = result and a[ i ] == b[ i ];
 
         duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
@@ -301,13 +344,14 @@ int main876878 ( ) {
     }
 
     {
+        std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
         bool result = true;
 
         std::uint64_t duration;
         plf::nanotimer timer;
         timer.start ( );
 
-        for ( std::size_t i = 0; i < 12 * N; i += 2 )
+        for ( std::size_t i = 0; i < 12; i += 2 )
             result = result and sax::equal_m128 ( a.data ( ) + i, b.data ( ) + i );
 
         duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
@@ -315,28 +359,30 @@ int main876878 ( ) {
     }
 
     {
+        std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
         bool result = true;
 
         std::uint64_t duration;
         plf::nanotimer timer;
         timer.start ( );
 
-        for ( std::size_t i = 0; i < 12 * N; i += 3 )
-            result = result and sax::equal_m192 ( a.data ( ) + i, a.data ( ) + i );
+        for ( std::size_t i = 0; i < 12; i += 3 )
+            result = result and sax::equal_m192 ( a.data ( ) + i, b.data ( ) + i );
 
         duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
         std::cout << std::dec << duration << " ms " << result << nl;
     }
 
     {
+        std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
         bool result = true;
 
         std::uint64_t duration;
         plf::nanotimer timer;
         timer.start ( );
 
-        for ( std::size_t i = 0; i < 12 * N; i += 4 )
-            result = result and sax::equal_m256 ( a.data ( ) + i, a.data ( ) + i );
+        for ( std::size_t i = 0; i < 12; i += 4 )
+            result = result and sax::equal_m256 ( a.data ( ) + i, b.data ( ) + i );
 
         duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
         std::cout << std::dec << duration << " ms " << result << nl;
