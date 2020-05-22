@@ -132,11 +132,13 @@ inline bool const LITTLE_ENDIAN = is_little_endian ( );
 }
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m128 ( void const * const a_, void const * const b_ ) noexcept {
-    return 0xF == _mm_movemask_ps ( _mm_cmpeq_ps ( _mm_load_ps ( ( float * ) a_ ), _mm_load_ps ( ( float * ) b_ ) ) );
+    __m128 a = _mm_load_ps ( ( float * ) a_ ), b = _mm_load_ps ( ( float * ) b_ );
+    __m128 c = _mm_cmpeq_ps ( a, b );
+    return 0xF == _mm_movemask_ps ( c );
 }
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m192 ( void const * const a_, void const * const b_ ) noexcept {
-    // https://godbolt.org/z/efTuAz
+    // https://godbolt.org/z/efTuAz https://godbolt.org/z/XQYNzT
     __m128d c0 = _mm_setzero_pd ( ), c1 = _mm_setzero_pd ( ), c2 = _mm_setzero_pd ( );
     _mm_loadl_pd ( c0, ( double const * ) a_ + 0 );
     _mm_loadl_pd ( c1, ( double const * ) a_ + 1 );

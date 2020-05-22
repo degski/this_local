@@ -200,12 +200,19 @@ int main5686780 ( ) {
 
 int main ( ) {
 
-    alignas ( 32 ) std::uint64_t a[ 4 ] = { 1, 1, 1 };
-    alignas ( 32 ) std::uint64_t b[ 4 ] = { 1, 0, 1 };
+    std::vector<long long> a ( 4, ~0 );
+    std::vector<long long> b ( 4, 0 );
 
-    std::cout << sax::equal_m192 ( a, b ) << nl;
+    std::cout << sax::equal_m128 ( a.data ( ), b.data ( ) ) << nl;
+    std::cout << sax::equal_m192 ( a.data ( ), b.data ( ) ) << nl;
+    std::cout << sax::equal_m192 ( a.data ( ), b.data ( ) ) << nl;
 
-    exit ( 0 );
+    // for ( std::size_t i = 0; i < 256; ++i ) {
+
+    //     std::cout << sax::equal_m128 ( a.data ( ), b.data ( ) ) << nl;
+    // }
+
+    /*
 
     sax::uint128_t de = { 1, 2 };
     sax::uint128_t ex = { 3, 4 };
@@ -216,10 +223,6 @@ int main ( ) {
     std::cout << de << cr << nl;
 
     sax::lockless::unbounded_circular_list<int> list;
-
-    exit ( 0 );
-
-    /*
 
     std::ios::sync_with_stdio ( false );
 
@@ -260,6 +263,78 @@ int main ( ) {
     std::cout << nl;
 
     */
+
+    return EXIT_SUCCESS;
+}
+
+std::vector<std::uint64_t> random_vector ( std::size_t length_ ) {
+    std::vector<std::uint64_t> v;
+    for ( std::size_t i = 0; i < length_; ++i )
+        v.emplace_back ( rng ( ) );
+    return v;
+}
+
+int main876878 ( ) {
+
+    constexpr int N = 100'000;
+
+    std::vector<std::uint64_t> a = random_vector ( 12 * N ), b = { a };
+
+    {
+        bool result = true;
+
+        std::uint64_t duration;
+        plf::nanotimer timer;
+        timer.start ( );
+
+        for ( std::size_t i = 0; i < 12 * N; i += 1 )
+            result = result and a[ i ] == b[ i ];
+
+        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
+        std::cout << std::dec << duration << " ms " << result << nl;
+    }
+
+    {
+        bool result = true;
+
+        std::uint64_t duration;
+        plf::nanotimer timer;
+        timer.start ( );
+
+        for ( std::size_t i = 0; i < 12 * N; i += 2 )
+            result = result and sax::equal_m128 ( a.data ( ) + i, b.data ( ) + i );
+
+        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
+        std::cout << std::dec << duration << " ms " << result << nl;
+    }
+
+    {
+        bool result = true;
+
+        std::uint64_t duration;
+        plf::nanotimer timer;
+        timer.start ( );
+
+        for ( std::size_t i = 0; i < 12 * N; i += 3 )
+            result = result and sax::equal_m192 ( a.data ( ) + i, a.data ( ) + i );
+
+        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
+        std::cout << std::dec << duration << " ms " << result << nl;
+    }
+
+    {
+        bool result = true;
+
+        std::uint64_t duration;
+        plf::nanotimer timer;
+        timer.start ( );
+
+        for ( std::size_t i = 0; i < 12 * N; i += 4 )
+            result = result and sax::equal_m256 ( a.data ( ) + i, a.data ( ) + i );
+
+        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
+        std::cout << std::dec << duration << " ms " << result << nl;
+    }
 
     return EXIT_SUCCESS;
 }
