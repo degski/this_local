@@ -131,21 +131,41 @@ inline bool const LITTLE_ENDIAN = is_little_endian ( );
     return a == b;
 }
 
+inline constexpr int USE_AVX = false;
+
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m128 ( void const * const a_, void const * const b_ ) noexcept {
     return 0xF == _mm_movemask_ps ( _mm_cmpeq_ps ( _mm_load_ps ( ( float * ) a_ ), _mm_load_ps ( ( float * ) b_ ) ) );
 }
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m192 ( void const * const a_, void const * const b_ ) noexcept {
-    __m256i a = _mm256_insert_epi64 ( _mm256_cmpeq_epi64 ( _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) a_ ) ),
-                                                           _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) b_ ) ) ),
-                                      ~0ll, 3 );
-    return 0xF == _mm256_movemask_pd ( _mm256_castsi256_pd ( a ) );
+    if constexpr ( USE_AVX ) {
+        __m256i a = _mm256_insert_epi64 ( _mm256_cmpeq_epi64 ( _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) a_ ) ),
+                                                               _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) b_ ) ) ),
+                                          ~0ll, 3 );
+        return 0xF == _mm256_movemask_pd ( _mm256_castsi256_pd ( a ) );
+    }
+    else {
+        __m128d c0 = _mm_setzero_pd ( ), c1 = _mm_setzero_pd ( ), c2 = _mm_setzero_pd ( );
+        _mm_loadl_pd ( c0, ( double const * ) a_ + 0 );
+        _mm_loadl_pd ( c1, ( double const * ) a_ + 1 );
+        _mm_loadl_pd ( c2, ( double const * ) a_ + 2 );
+        _mm_loadh_pd ( c0, ( double const * ) b_ + 0 );
+        _mm_loadh_pd ( c1, ( double const * ) b_ + 1 );
+        _mm_loadh_pd ( c2, ( double const * ) b_ + 2 );
+        return ( 0xF == _mm_movemask_ps ( _mm_cmpeq_ps ( _mm_castpd_ps ( c0 ), _mm_castpd_ps ( c1 ) ) ) ) and
+               ( 0xF == _mm_movemask_ps ( _mm_cmpeq_ps ( _mm_castpd_ps ( c1 ), _mm_castpd_ps ( c2 ) ) ) );
+    }
 }
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m256 ( void const * const a_, void const * const b_ ) noexcept {
-    __m256i a = _mm256_cmpeq_epi64 ( _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) a_ ) ),
-                                     _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) b_ ) ) );
-    return 0xF == _mm256_movemask_pd ( _mm256_castsi256_pd ( a ) );
+    if constexpr ( USE_AVX ) {
+        __m256i a = _mm256_cmpeq_epi64 ( _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) a_ ) ),
+                                         _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) b_ ) ) );
+        return 0xF == _mm256_movemask_pd ( _mm256_castsi256_pd ( a ) );
+    }
+    else {
+        return equal_m128 ( a_, b_ ) and equal_m128 ( ( char const * const ) a_ + 16, ( char const * const ) b_ + 16 );
+    }
 }
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m512 ( void const * const a_, void const * const b_ ) noexcept {
@@ -442,7 +462,7 @@ class unbounded_circular_list final {
 
     using nodes_type = plf::colony<node, typename Allocator::template rebind<node>::other>;
 
-    // exposes the underlying container
+    // exposes the underlying container (not safe)
 
     using nodes_iterator       = typename nodes_type::iterator;
     using nodes_const_iterator = typename nodes_type::const_iterator;

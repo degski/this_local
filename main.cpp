@@ -200,8 +200,8 @@ int main5686780 ( ) {
 
 int main ( ) {
 
-    alignas ( 32 ) std::uint64_t a[ 4 ] = { 1, 1, 1, 0 };
-    alignas ( 32 ) std::uint64_t b[ 4 ] = { 1, 0, 1, 1 };
+    alignas ( 32 ) std::uint64_t a[ 4 ] = { 1, 1, 1 };
+    alignas ( 32 ) std::uint64_t b[ 4 ] = { 1, 0, 1 };
 
     std::cout << sax::equal_m192 ( a, b ) << nl;
 
