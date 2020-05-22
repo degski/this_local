@@ -617,21 +617,21 @@ class unbounded_circular_list final {
         // the body of the cas loop un-rolled once (same as below)
         counted_end_link old             = sentinel.load ( std::memory_order_relaxed );
         unsigned char new_aba_id         = std::exchange ( *( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0 ) + 1;
-        *( ( counted_link * ) new_node ) = counted_link{ link{ ( link * ) old.node, ( link * ) old.node->next }, 1 };
+        *( ( counted_link * ) new_node ) = counted_link{ link{ ( link * ) old.node, old.node->next }, 1 };
         if constexpr ( std::is_same<at::front, At>::value )
-            store_sentinel ( old.node, counted_link{ link{ ( link * ) old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
+            store_sentinel ( old.node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
         else
-            store_sentinel ( new_node, counted_link{ link{ ( link * ) old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
+            store_sentinel ( new_node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
         // end of un-rolled loop
         while ( not dwcas ( ( ( volatile uint128_t * ) old.node ), make_m128 ( sentinel.load ( std::memory_order_relaxed ) ),
                             ( ( uint128_t * ) new_node ) ) ) {
             old = sentinel.load ( std::memory_order_relaxed );
             std::memset ( ( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0, 1 );
-            *( ( counted_link * ) new_node ) = counted_link{ link{ ( link * ) old.node, ( link * ) old.node->next }, 1 };
+            *( ( counted_link * ) new_node ) = counted_link{ link{ ( link * ) old.node, old.node->next }, 1 };
             if constexpr ( std::is_same<at::front, At>::value )
-                store_sentinel ( old.node, counted_link{ link{ ( link * ) old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
+                store_sentinel ( old.node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
             else
-                store_sentinel ( new_node, counted_link{ link{ ( link * ) old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
+                store_sentinel ( new_node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
         }
         new_node->next->prev = new_node;
         return std::forward<nodes_iterator> ( it_ );
