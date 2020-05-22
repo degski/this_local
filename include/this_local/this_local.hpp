@@ -144,7 +144,7 @@ class this_local {
     [[nodiscard]] ValueType & get_implementation ( type_pointer_type && self_, Args &&... args_ );
 
     plf::list<node, Allocator<node>> nodes;
-    mutable spin_rw_lock<int> rw_mutex;
+    mutable lockless::spin_rw_lock<int> rw_mutex;
 
     public:
     using type           = Type;
@@ -154,7 +154,7 @@ class this_local {
     using const_iterator = typename plf::list<node, Allocator<node>>::const_iterator;
     using value_type     = ValueType;
     using allocator      = Allocator<node>;
-    using mutex          = spin_rw_lock<int>;
+    using mutex          = lockless::spin_rw_lock<int>;
 
     template<typename... Args>
     [[nodiscard]] value_type & operator( ) ( type_pointer && self_, Args &&... args_ ) noexcept {

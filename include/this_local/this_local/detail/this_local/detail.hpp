@@ -80,6 +80,8 @@
 #include "../../../this_local/plf_list.h"
 #include "../../../this_local/plf_stack.h"
 
+inline bool constexpr SAX_USE_IO = true;
+
 namespace sax {
 
 [[nodiscard]] bool has_thread_exited ( std::thread::native_handle_type handle_ ) noexcept {
@@ -96,23 +98,25 @@ namespace sax {
 }
 
 namespace detail {
-template<typename T>
-[[nodiscard]] inline constexpr std::uint16_t abbreviate_pointer_implementation ( std::uintptr_t pointer_ ) noexcept {
-    pointer_ >>= ilog2 ( alignof ( T ) ); // strip lower bits
-    pointer_ ^= pointer_ >> 32;           // fold high into low
-    pointer_ ^= pointer_ >> 16;           // fold high into low
+template<typename ValueType>
+[[nodiscard]] inline constexpr std::enable_if_t<SAX_USE_IO, std::uint16_t>
+abbreviate_pointer_implementation ( std::uintptr_t pointer_ ) noexcept {
+    pointer_ >>= ilog2 ( alignof ( ValueType ) ); // strip lower bits
+    pointer_ ^= pointer_ >> 32;                   // fold high into low
+    pointer_ ^= pointer_ >> 16;                   // fold high into low
     return ( std::uint16_t ) pointer_;
 }
 } // namespace detail
-template<typename T>
-[[nodiscard]] inline constexpr std::uint16_t abbreviate_pointer ( T const * pointer_ ) noexcept {
-    return detail::abbreviate_pointer_implementation<T> ( ( std::uintptr_t ) pointer_ );
+template<typename ValueType>
+[[nodiscard]] inline constexpr std::enable_if_t<SAX_USE_IO, std::uint16_t>
+abbreviate_pointer ( ValueType const * pointer_ ) noexcept {
+    return detail::abbreviate_pointer_implementation<ValueType> ( std::forward<std::uintptr_t> ( ( std::uintptr_t ) pointer_ ) );
 }
 
-template<typename T>
+template<typename ValueType>
 inline constexpr int hi_index ( ) noexcept {
     short v = 1;
-    return *reinterpret_cast<char *> ( &v ) ? sizeof ( T ) - 1 : 0;
+    return *reinterpret_cast<char *> ( &v ) ? sizeof ( ValueType ) - 1 : 0;
 }
 
 [[nodiscard]] inline constexpr bool is_little_endian ( ) noexcept { return hi_index<short> ( ); }
@@ -121,9 +125,9 @@ inline bool const LITTLE_ENDIAN = is_little_endian ( );
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m64 ( void const * const a_, void const * const b_ ) noexcept {
     std::uint64_t a;
-    std::memcpy ( &a, a_, 8 );
+    std::memcpy ( &a, a_, sizeof ( a ) );
     std::uint64_t b;
-    std::memcpy ( &b, b_, 8 );
+    std::memcpy ( &b, b_, sizeof ( b ) );
     return a == b;
 }
 
@@ -158,8 +162,8 @@ struct alignas ( 16 ) uint128_t {
 #endif
 };
 
-template<typename T>
-uint128_t make_m128 ( T l_ ) noexcept {
+template<typename ValueType>
+uint128_t make_m128 ( ValueType l_ ) noexcept {
     uint128_t l;
     memcpy ( &l, &l_, sizeof ( l ) );
     return l;
@@ -185,22 +189,25 @@ struct alignas ( 64 ) uint512_t {
 #endif
 };
 
-template<typename T>
+template<typename ValueType>
 using pun_type = std::conditional_t<
-    sizeof ( T ) == 64, uint512_t,
+    sizeof ( ValueType ) == 64, uint512_t,
     std::conditional_t<
-        sizeof ( T ) == 32, uint256_t,
-        std::conditional_t<sizeof ( T ) == 16, uint128_t,
-                           std::conditional_t<sizeof ( T ) == 8, uint64_t,
-                                              std::conditional_t<sizeof ( T ) == 4, uint32_t,
-                                                                 std::conditional_t<sizeof ( T ) == 2, uint16_t, uint8_t>>>>>>;
+        sizeof ( ValueType ) == 32, uint256_t,
+        std::conditional_t<
+            sizeof ( ValueType ) == 16, uint128_t,
+            std::conditional_t<sizeof ( ValueType ) == 8, uint64_t,
+                               std::conditional_t<sizeof ( ValueType ) == 4, uint32_t,
+                                                  std::conditional_t<sizeof ( ValueType ) == 2, uint16_t, uint8_t>>>>>>;
 
-template<typename T>
-[[nodiscard]] inline pun_type<T> pun_for_fun ( void const * const t_ ) noexcept {
-    pun_type<T> t;
-    std::memcpy ( &t, t_, sizeof ( pun_type<T> ) );
+template<typename ValueType>
+[[nodiscard]] inline pun_type<ValueType> pun_for_fun ( void const * const t_ ) noexcept {
+    pun_type<ValueType> t;
+    std::memcpy ( &t, t_, sizeof ( pun_type<ValueType> ) );
     return t;
 }
+
+namespace lockless {
 
 // Algorithms built around CAS typically read some key memory location and remember the old value. Based on that old value, they
 // compute some new value. Then they try to swap in the new value using CAS, where the comparison checks for the location still
@@ -237,12 +244,16 @@ template<typename MutexType>
 #endif
 }
 
+} // namespace lockless
+
 [[nodiscard]] static constexpr int ilog2 ( std::uint64_t v_ ) noexcept {
     int c = !!v_;
     while ( v_ >>= 1 )
         c += 1;
     return c;
 }
+
+namespace lockless {
 
 HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
 #if ( defined( __clang__ ) or defined( __GNUC__ ) )
@@ -330,6 +341,8 @@ struct slim_rw_lock final {
     SRWLOCK handle = SRWLOCK_INIT;
 };
 
+} // namespace lockless
+
 #define ever                                                                                                                       \
     ;                                                                                                                              \
     ;
@@ -339,149 +352,21 @@ struct front {};
 struct back {};
 }; // namespace at
 
-template<typename T, typename Allocator = std::allocator<T>>
-class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed., Listing 7.13 - Anthony Williams
-
-    public:
-    using value_type      = T;
-    using pointer         = T *;
-    using reference       = T &;
-    using const_pointer   = T const *;
-    using const_reference = T const &;
-
-    struct node;
-    using node_ptr       = node *;
-    using const_node_ptr = node const *;
-
-    struct counted_link {
-
-        node_ptr next;
-        long long external_count = 0;
-    };
-
-    struct node {
-
-        counted_link link;
-        std::atomic<long long> internal_count;
-
-        template<typename... Args>
-        node ( Args &&... args_ ) : internal_count{ 0 }, data{ std::forward<Args> ( args_ )... } {}
-
-        template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr link_ ) noexcept {
-            auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            std::scoped_lock lock ( lock_free_plf_stack::global );
-            out_ << '<' << ap ( link_ ) << ' ' << ap ( link_->link.next ) << '>';
-            return out_;
-        }
-        template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const & link_ ) noexcept {
-            return operator<< ( out_, &link_ );
-        }
-
-        value_type data;
-    };
-
-    private:
-    using nodes_type = plf::colony<node, typename Allocator::template rebind<node>::other>;
-
-    using nodes_iterator       = typename nodes_type::iterator;
-    using nodes_const_iterator = typename nodes_type::const_iterator;
-
-    nodes_type nodes;
-    std::atomic<counted_link> head;
-
-    public:
-    alignas ( 64 ) static spin_rw_lock<long long> global;
-
-    private:
-    HEDLEY_ALWAYS_INLINE void increase_head_count ( counted_link & old_counter_ ) noexcept {
-        counted_link new_counter;
-        do {
-            new_counter = old_counter_;
-            new_counter.external_count += 1;
-        } while (
-            not head.compare_exchange_strong ( old_counter_, new_counter, std::memory_order_acquire, std::memory_order_relaxed ) );
-        old_counter_.external_count = new_counter.external_count;
-    }
-
-    [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
-        counted_link link = { &*it_, 1 };
-        link.next->link   = head.load ( std::memory_order_relaxed );
-        while ( not head.compare_exchange_weak ( link.next->link, link, std::memory_order_release, std::memory_order_relaxed ) )
-            yield ( );
-        return std::forward<nodes_iterator> ( it_ );
-    }
-
-    public:
-    lock_free_plf_stack ( ) : head{ init_head ( ) } {}
-
-    [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) {
-        return insert_regular_implementation ( nodes.emplace ( data_ ) );
-    }
-    [[maybe_unused]] nodes_iterator push ( value_type && data_ ) {
-        return insert_regular_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
-    }
-    template<typename... Args>
-    [[maybe_unused]] nodes_iterator emplace ( Args &&... args_ ) {
-        return insert_regular_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
-    }
-
-    void pop ( ) noexcept {
-        counted_link old_head = head.load ( std::memory_order_relaxed );
-        for ( ever ) {
-            increase_head_count ( old_head );
-            if ( node_ptr const next = old_head.next; next ) {
-                if ( head.compare_exchange_strong ( old_head, next->link, std::memory_order_relaxed ) ) {
-                    int const count_increase = old_head.external_count - 2;
-                    if ( next->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
-                        nodes.erase ( get_iterator_from_pointer ( next ) );
-                    return;
-                }
-                else {
-                    if ( next->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 ) {
-                        next->internal_count.load ( std::memory_order_acquire );
-                        nodes.erase ( get_iterator_from_pointer ( next ) );
-                    }
-                }
-            }
-            else {
-                return;
-            }
-        }
-    }
-
-    [[nodiscard]] nodes_const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
-    [[nodiscard]] nodes_const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
-    [[nodiscard]] nodes_iterator begin ( ) noexcept { return nodes.begin ( ); }
-    [[nodiscard]] nodes_const_iterator end ( ) const noexcept { return nodes.end ( ); }
-    [[nodiscard]] nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
-    [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
-
-    counted_link init_head ( ) {
-        nodes_iterator it = nodes.emplace ( );
-        counted_link p;
-        p.next = &*it;
-        nodes.erase ( it );
-        return p;
-    }
-};
-
-template<typename T, typename Allocator>
-alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_stack<T, Allocator>::global;
-
-alignas ( 64 ) inline static spin_rw_lock<long long> global_mutex;
+alignas ( 64 ) inline static lockless::spin_rw_lock<long long> global_mutex;
 
 namespace lockless {
-template<typename T, typename Allocator = std::allocator<T>, typename DefaultInsertionMode = at::back>
+template<typename ValueType, typename Allocator = std::allocator<ValueType>, typename DefaultInsertionMode = at::back>
 class unbounded_circular_list final {
 
     public:
-    using value_type      = T;
-    using pointer         = T *;
-    using reference       = T &;
-    using const_pointer   = T const *;
-    using const_reference = T const &;
+    using value_type             = ValueType;
+    using allocator              = Allocator;
+    using default_insertion_mode = DefaultInsertionMode;
+
+    using pointer         = ValueType *;
+    using const_pointer   = ValueType const *;
+    using reference       = ValueType &;
+    using const_reference = ValueType const &;
 
     struct alignas ( 16 ) link {
         link *prev, *next;
@@ -496,7 +381,6 @@ class unbounded_circular_list final {
     };
 
     struct counted_link : public link {
-
         unsigned long external_count;
 
         template<typename Stream>
@@ -512,7 +396,6 @@ class unbounded_circular_list final {
     using const_counted_link_ptr = counted_link const *;
 
     struct node final : counted_link {
-
         std::atomic<unsigned long> internal_count = { 0 };
 
         template<typename... Args>
@@ -538,8 +421,7 @@ class unbounded_circular_list final {
     using const_node_ptr = node const *;
 
     struct counted_sentinel final : public counted_link {
-
-        node_ptr node = nullptr; // a sentinel value
+        node_ptr node = nullptr; // a sentinel value, the last node added
 
         template<typename Stream>
         [[maybe_unused]] friend Stream & operator<< ( Stream & out_, counted_sentinel const & link_ ) noexcept {
@@ -898,3 +780,136 @@ template<typename Stream>
 #endif
 
 } // namespace sax
+
+#if 0
+template<typename ValueType, typename Allocator = std::allocator<ValueType>>
+class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed., Listing 7.13 - Anthony Williams
+
+    public:
+    using value_type      = ValueType;
+    using pointer         = ValueType *;
+    using reference       = ValueType &;
+    using const_pointer   = ValueType const *;
+    using const_reference = ValueType const &;
+
+    struct node;
+    using node_ptr       = node *;
+    using const_node_ptr = node const *;
+
+    struct counted_link {
+
+        node_ptr next;
+        long long external_count = 0;
+    };
+
+    struct node {
+
+        counted_link link;
+        std::atomic<long long> internal_count;
+
+        template<typename... Args>
+        node ( Args &&... args_ ) : internal_count{ 0 }, data{ std::forward<Args> ( args_ )... } {}
+
+        template<typename Stream>
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr link_ ) noexcept {
+            auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
+            std::scoped_lock lock ( lock_free_plf_stack::global );
+            out_ << '<' << ap ( link_ ) << ' ' << ap ( link_->link.next ) << '>';
+            return out_;
+        }
+        template<typename Stream>
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const & link_ ) noexcept {
+            return operator<< ( out_, &link_ );
+        }
+
+        value_type data;
+    };
+
+    private:
+    using nodes_type = plf::colony<node, typename Allocator::template rebind<node>::other>;
+
+    using nodes_iterator       = typename nodes_type::iterator;
+    using nodes_const_iterator = typename nodes_type::const_iterator;
+
+    nodes_type nodes;
+    std::atomic<counted_link> head;
+
+    public:
+    alignas ( 64 ) static spin_rw_lock<long long> global;
+
+    private:
+    HEDLEY_ALWAYS_INLINE void increase_head_count ( counted_link & old_counter_ ) noexcept {
+        counted_link new_counter;
+        do {
+            new_counter = old_counter_;
+            new_counter.external_count += 1;
+        } while (
+            not head.compare_exchange_strong ( old_counter_, new_counter, std::memory_order_acquire, std::memory_order_relaxed ) );
+        old_counter_.external_count = new_counter.external_count;
+    }
+
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
+        counted_link link = { &*it_, 1 };
+        link.next->link   = head.load ( std::memory_order_relaxed );
+        while ( not head.compare_exchange_weak ( link.next->link, link, std::memory_order_release, std::memory_order_relaxed ) )
+            yield ( );
+        return std::forward<nodes_iterator> ( it_ );
+    }
+
+    public:
+    lock_free_plf_stack ( ) : head{ init_head ( ) } {}
+
+    [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) {
+        return insert_regular_implementation ( nodes.emplace ( data_ ) );
+    }
+    [[maybe_unused]] nodes_iterator push ( value_type && data_ ) {
+        return insert_regular_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+    }
+    template<typename... Args>
+    [[maybe_unused]] nodes_iterator emplace ( Args &&... args_ ) {
+        return insert_regular_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+    }
+
+    void pop ( ) noexcept {
+        counted_link old_head = head.load ( std::memory_order_relaxed );
+        for ( ever ) {
+            increase_head_count ( old_head );
+            if ( node_ptr const next = old_head.next; next ) {
+                if ( head.compare_exchange_strong ( old_head, next->link, std::memory_order_relaxed ) ) {
+                    int const count_increase = old_head.external_count - 2;
+                    if ( next->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
+                        nodes.erase ( get_iterator_from_pointer ( next ) );
+                    return;
+                }
+                else {
+                    if ( next->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 ) {
+                        next->internal_count.load ( std::memory_order_acquire );
+                        nodes.erase ( get_iterator_from_pointer ( next ) );
+                    }
+                }
+            }
+            else {
+                return;
+            }
+        }
+    }
+
+    [[nodiscard]] nodes_const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
+    [[nodiscard]] nodes_const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
+    [[nodiscard]] nodes_iterator begin ( ) noexcept { return nodes.begin ( ); }
+    [[nodiscard]] nodes_const_iterator end ( ) const noexcept { return nodes.end ( ); }
+    [[nodiscard]] nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
+    [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
+
+    counted_link init_head ( ) {
+        nodes_iterator it = nodes.emplace ( );
+        counted_link p;
+        p.next = &*it;
+        nodes.erase ( it );
+        return p;
+    }
+};
+
+template<typename ValueType, typename Allocator>
+alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_stack<ValueType, Allocator>::global;
+#endif
