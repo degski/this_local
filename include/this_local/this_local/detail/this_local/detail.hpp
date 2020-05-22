@@ -95,12 +95,18 @@ namespace sax {
 #endif
 }
 
+namespace detail {
 template<typename T>
-[[nodiscard]] static constexpr std::uint16_t abbreviate_pointer ( T const * pointer_ ) noexcept {
-    ( std::uintptr_t ) pointer_ >>= ilog2 ( alignof ( T ) );          // strip lower bits
-    ( std::uintptr_t ) pointer_ ^= ( std::uintptr_t ) pointer_ >> 32; // fold high into low
-    ( std::uintptr_t ) pointer_ ^= ( std::uintptr_t ) pointer_ >> 16; // fold high into low
-    return ( std::uint16_t ) ( std::uintptr_t ) pointer_;
+[[nodiscard]] inline constexpr std::uint16_t abbreviate_pointer_implementation ( std::uintptr_t pointer_ ) noexcept {
+    pointer_ >>= ilog2 ( alignof ( T ) ); // strip lower bits
+    pointer_ ^= pointer_ >> 32;           // fold high into low
+    pointer_ ^= pointer_ >> 16;           // fold high into low
+    return ( std::uint16_t ) pointer_;
+}
+} // namespace detail
+template<typename T>
+[[nodiscard]] inline constexpr std::uint16_t abbreviate_pointer ( T const * pointer_ ) noexcept {
+    return detail::abbreviate_pointer_implementation<T> ( ( std::uintptr_t ) pointer_ );
 }
 
 template<typename T>
@@ -205,29 +211,29 @@ template<typename T>
 // other words, wait a little before retrying the CAS.
 
 template<typename MutexType>
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool soft_dwcas ( uint128_t & dest_, uint128_t ex_new_, uint128_t & cr_old_ ) noexcept {
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool soft_dwcas ( uint128_t * dest_, uint128_t ex_new_, uint128_t * cr_old_ ) noexcept {
     alignas ( 64 ) static MutexType cas_mutex;
     std::scoped_lock lock ( cas_mutex );
-    bool check = not equal_m128 ( &dest_, &cr_old_ );
-    std::memcpy ( &cr_old_, &dest_, 16 );
+    bool check = not equal_m128 ( dest_, cr_old_ );
+    std::memcpy ( cr_old_, dest_, 16 );
     if ( check )
         return false;
-    std::memcpy ( &dest_, &ex_new_, 16 );
+    std::memcpy ( dest_, &ex_new_, 16 );
     return true;
 }
 
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( volatile uint128_t & dest_, uint128_t ex_new_, uint128_t & cr_old_ ) noexcept {
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( volatile uint128_t * dest_, uint128_t ex_new_, uint128_t * cr_old_ ) noexcept {
 #if ( defined( __clang__ ) or defined( __GNUC__ ) )
     bool value;
     __asm__ __volatile__( "lock cmpxchg16b %1\n\t"
                           "setz %0"
-                          : "=q"( value ), "+m"( dest_ ), "+d"( cr_old_.hi ), "+a"( cr_old_.lo )
+                          : "=q"( value ), "+m"( dest_ ), "+d"( cr_old_->hi ), "+a"( cr_old_->lo )
                           : "c"( ex_new_.hi ), "b"( ex_new_.lo )
                           : "cc" );
     return value;
 #else
-    return _InterlockedCompareExchange128 ( ( volatile long long * ) &dest_.lo, ex_new_.hi, ex_new_.lo,
-                                            ( long long * ) &cr_old_.lo );
+    return _InterlockedCompareExchange128 ( ( volatile long long * ) dest_->lo, ex_new_.hi, ex_new_.lo,
+                                            ( long long * ) cr_old_->lo );
 #endif
 }
 
@@ -606,21 +612,21 @@ class unbounded_circular_list final {
         // the body of the cas loop un-rolled once (same as below)
         counted_node_link old            = sentinel.load ( std::memory_order_relaxed );
         unsigned char new_aba            = std::exchange ( *( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0 ) + 1;
-        *( ( counted_link * ) new_node ) = { ( counted_link * ) old.node, ( counted_link * ) old.node->next };
+        *( ( counted_link * ) new_node ) = { { ( counted_link * ) old.node, ( counted_link * ) old.node->next } };
         if constexpr ( std::is_same<at::front, At>::value )
-            store_sentinel ( old.node, { old.node->prev, new_node }, new_aba );
+            store_sentinel ( old.node, { { old.node->prev, new_node } }, new_aba );
         else
-            store_sentinel ( new_node, { old.node->prev, new_node }, new_aba );
+            store_sentinel ( new_node, { { old.node->prev, new_node } }, new_aba );
         // end of un-rolled loop
-        while ( not dwcas ( *( ( volatile uint128_t * ) old.node ), make_m128 ( sentinel.load ( std::memory_order_relaxed ) ),
-                            *( ( uint128_t * ) new_node ) ) ) {
+        while ( not dwcas ( ( ( volatile uint128_t * ) old.node ), make_m128 ( sentinel.load ( std::memory_order_relaxed ) ),
+                            ( ( uint128_t * ) new_node ) ) ) {
             old = sentinel.load ( std::memory_order_relaxed );
             std::memset ( ( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0, 1 );
-            *( ( counted_link * ) new_node ) = { ( counted_link * ) old.node, ( counted_link * ) old.node->next };
+            *( ( counted_link * ) new_node ) = { { ( counted_link * ) old.node, ( counted_link * ) old.node->next } };
             if constexpr ( std::is_same<At, at::front>::value )
-                store_sentinel ( old.node, { old.node->prev, new_node }, new_aba );
+                store_sentinel ( old.node, { { old.node->prev, new_node } }, new_aba );
             else
-                store_sentinel ( new_node, { old.node->prev, new_node }, new_aba );
+                store_sentinel ( new_node, { { old.node->prev, new_node } }, new_aba );
         }
         new_node->next->prev = new_node;
         return std::forward<nodes_iterator> ( it_ );
@@ -630,15 +636,15 @@ class unbounded_circular_list final {
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_init_implementation ( nodes_iterator && it_ ) noexcept {
         std::scoped_lock lock ( instance );
         node_ptr new_node                = &*it_;
-        *( ( counted_link * ) new_node ) = { &end_link, &end_link, 1 };
+        *( ( counted_link * ) new_node ) = { { &end_link, &end_link } };
         end_link.prev = end_link.next = ( counted_link * ) new_node;
         end_link.node                 = nullptr;
         if constexpr ( std::is_same<At, at::front>::value ) {
-            store_sentinel ( ( node_ptr ) &end_link, { ( counted_link * ) &end_link, ( counted_link * ) &end_link }, 1 );
+            store_sentinel ( ( node_ptr ) &end_link, { { ( counted_link * ) &end_link, ( counted_link * ) &end_link } }, 1 );
             insert_front_implementation = &unbounded_circular_list::insert_regular_implementation<at::front>;
         }
         else {
-            store_sentinel ( new_node, { &end_link, &end_link }, 1 );
+            store_sentinel ( new_node, { { &end_link, &end_link } }, 1 );
             insert_back_implementation = &unbounded_circular_list::insert_regular_implementation<at::back>;
         }
         return std::forward<nodes_iterator> ( it_ );

@@ -212,7 +212,7 @@ int main ( ) {
     sax::uint128_t cr = { 0, 2 };
 
     std::cout << de << cr << nl;
-    std::cout << sax::soft_dwcas<sax::spin_rw_lock<long long>> ( de, ex, cr ) << nl;
+    std::cout << sax::soft_dwcas<sax::spin_rw_lock<long long>> ( &de, ex, &cr ) << nl;
     std::cout << de << cr << nl;
 
     sax::lockless::unbounded_circular_list<int> list;
