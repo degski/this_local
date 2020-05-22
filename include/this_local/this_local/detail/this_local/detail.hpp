@@ -485,6 +485,14 @@ class unbounded_circular_list final {
 
     struct alignas ( 16 ) link {
         link *prev, *next;
+
+        template<typename Stream>
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, link const & link_ ) noexcept {
+            auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
+            std::scoped_lock lock ( global_mutex );
+            out_ << '<' << ap ( link_.prev ) << ' ' << ap ( link_.next ) << '>';
+            return out_;
+        }
     };
 
     struct counted_link : public link {
@@ -607,14 +615,13 @@ class unbounded_circular_list final {
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
         node_ptr new_node = &*it_;
         // the body of the cas loop un-rolled once (same as below)
-        counted_end_link old  = sentinel.load ( std::memory_order_relaxed );
-        unsigned char new_aba = std::exchange ( *( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0 ) + 1;
-        *( ( counted_link * ) new_node ) =
-            counted_link{ link{ ( counted_link * ) old.node, ( counted_link * ) old.node->next }, 1 };
+        counted_end_link old             = sentinel.load ( std::memory_order_relaxed );
+        unsigned char new_aba_id         = std::exchange ( *( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0 ) + 1;
+        *( ( counted_link * ) new_node ) = counted_link{ link{ ( link * ) old.node, ( link * ) old.node->next }, 1 };
         if constexpr ( std::is_same<at::front, At>::value )
-            store_sentinel ( old.node, counted_link{ link{ old.node->prev, new_node }, 1 }, new_aba );
+            store_sentinel ( old.node, counted_link{ link{ ( link * ) old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
         else
-            store_sentinel ( new_node, counted_link{ link{ old.node->prev, new_node }, 1 }, new_aba );
+            store_sentinel ( new_node, counted_link{ link{ ( link * ) old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
         // end of un-rolled loop
         while ( not dwcas ( ( ( volatile uint128_t * ) old.node ), make_m128 ( sentinel.load ( std::memory_order_relaxed ) ),
                             ( ( uint128_t * ) new_node ) ) ) {
@@ -622,9 +629,9 @@ class unbounded_circular_list final {
             std::memset ( ( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0, 1 );
             *( ( counted_link * ) new_node ) = counted_link{ link{ ( link * ) old.node, ( link * ) old.node->next }, 1 };
             if constexpr ( std::is_same<at::front, At>::value )
-                store_sentinel ( old.node, counted_link{ link{ old.node->prev, new_node }, 1 }, new_aba );
+                store_sentinel ( old.node, counted_link{ link{ ( link * ) old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
             else
-                store_sentinel ( new_node, counted_link{ link{ old.node->prev, new_node }, 1 }, new_aba );
+                store_sentinel ( new_node, counted_link{ link{ ( link * ) old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
         }
         new_node->next->prev = new_node;
         return std::forward<nodes_iterator> ( it_ );
@@ -637,11 +644,11 @@ class unbounded_circular_list final {
         *( ( counted_link * ) new_node ) = counted_link{ link{ &end_link, &end_link }, 1 };
         end_link                         = link{ ( link * ) new_node, ( link * ) new_node };
         if constexpr ( std::is_same<At, at::front>::value ) {
-            store_sentinel ( ( node_ptr ) &end_link, counted_link{ link{ ( link * ) &end_link, ( link * ) &end_link }, 1 } );
+            store_sentinel ( ( node_ptr ) &end_link, counted_link{ link{ &end_link, &end_link }, 1 } );
             insert_front_implementation = &unbounded_circular_list::insert_regular_implementation<at::front>;
         }
         else {
-            store_sentinel ( new_node, counted_link{ link{ ( link * ) &end_link, ( link * ) &end_link }, 1 } );
+            store_sentinel ( new_node, counted_link{ link{ &end_link, &end_link }, 1 } );
             insert_back_implementation = &unbounded_circular_list::insert_regular_implementation<at::back>;
         }
         return std::forward<nodes_iterator> ( it_ );
