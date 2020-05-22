@@ -215,6 +215,8 @@ int main ( ) {
     std::cout << sax::soft_dwcas<sax::spin_rw_lock<long long>> ( de, ex, cr ) << nl;
     std::cout << de << cr << nl;
 
+    sax::lockless::unbounded_circular_list<int> list;
+
     exit ( 0 );
 
     /*
