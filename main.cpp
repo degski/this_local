@@ -201,7 +201,7 @@ int main5686780 ( ) {
 int main ( ) {
 
     auto a = _mm_set_ps ( 0.0, 0.0, 0.0, 0.0 );
-    auto b = _mm_set_ps ( 0.0, 1.0, 0.0, 0.0 );
+    auto b = _mm_set_ps ( 0.0, 0.0, 0.0, 0.0 );
 
     std::cout << sax::equal_m128 ( &a, &b ) << ' ';
 

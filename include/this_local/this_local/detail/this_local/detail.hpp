@@ -169,16 +169,16 @@ inline bool const LITTLE_ENDIAN = is_little_endian ( );
     return ( not _mm_movemask_ps ( _mm_cmpneq_ps ( _mm_castpd_ps ( c0 ), _mm_castpd_ps ( c1 ) ) ) ) and
            ( not _mm_movemask_ps ( _mm_cmpneq_ps ( _mm_castpd_ps ( c1 ), _mm_castpd_ps ( c2 ) ) ) );
 }
-
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m192 ( void const * const a_, void const * const b_ ) noexcept {
+    return not equal_m192 ( a_, b_ );
+}
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m256 ( void const * const a_, void const * const b_ ) noexcept {
-    if constexpr ( true ) {
-        __m256i a = _mm256_cmpeq_epi64 ( _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) a_ ) ),
-                                         _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) b_ ) ) );
-        return _mm256_movemask_pd ( _mm256_castsi256_pd ( a ) );
-    }
-    else {
-        return equal_m128 ( a_, b_ ) and equal_m128 ( ( char const * const ) a_ + 16, ( char const * const ) b_ + 16 );
-    }
+    __m256i a = _mm256_cmpeq_epi64 ( _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) a_ ) ),
+                                     _mm256_castpd_si256 ( _mm256_load_pd ( ( double const * ) b_ ) ) );
+    return _mm256_movemask_pd ( _mm256_castsi256_pd ( a ) );
+}
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m256 ( void const * const a_, void const * const b_ ) noexcept {
+    return not equal_m256 ( a_, b_ );
 }
 
 struct alignas ( 16 ) uint128_t {
