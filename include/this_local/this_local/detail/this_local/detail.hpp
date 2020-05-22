@@ -568,10 +568,10 @@ class unbounded_circular_list final {
     alignas ( 64 ) spin_rw_lock<long long> instance;
 
     private:
-    alignas ( 64 ) std::atomic<counted_sentinel> sentinel; // the work-horse
-
-    nodes_type nodes;
+    std::atomic<counted_sentinel> sentinel;
     link end_link;
+    nodes_type nodes;
+
     nodes_iterator ( unbounded_circular_list::*insert_front_implementation ) ( nodes_iterator && ) noexcept;
     nodes_iterator ( unbounded_circular_list::*insert_back_implementation ) ( nodes_iterator && ) noexcept;
 
