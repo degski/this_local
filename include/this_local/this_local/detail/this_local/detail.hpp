@@ -537,12 +537,12 @@ class unbounded_circular_list final {
     using node_ptr       = node *;
     using const_node_ptr = node const *;
 
-    struct counted_end_link final : public counted_link {
+    struct counted_sentinel final : public counted_link {
 
         node_ptr node = nullptr; // a sentinel value
 
         template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, counted_end_link const & link_ ) noexcept {
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, counted_sentinel const & link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
             std::scoped_lock lock ( global_mutex );
             out_ << '<' << ap ( &link_ ) << ' ' << ap ( link_->prev ) << ' ' << ap ( link_->next ) << '.' << link_->external_count
@@ -553,8 +553,8 @@ class unbounded_circular_list final {
         [[nodiscard]] bool operator== ( counted_link const & r_ ) const noexcept { return equal_m128 ( this, &r_ ); }
     };
 
-    using counted_end_link_ptr       = counted_end_link *;
-    using const_counted_end_link_ptr = counted_end_link const *;
+    using counted_end_link_ptr       = counted_sentinel *;
+    using const_counted_end_link_ptr = counted_sentinel const *;
 
     private:
     using nodes_type = plf::colony<node, typename Allocator::template rebind<node>::other>;
@@ -568,7 +568,7 @@ class unbounded_circular_list final {
     alignas ( 64 ) spin_rw_lock<long long> instance;
 
     private:
-    alignas ( 64 ) std::atomic<counted_end_link> sentinel; // the work-horse
+    alignas ( 64 ) std::atomic<counted_sentinel> sentinel; // the work-horse
 
     nodes_type nodes;
     link end_link;
@@ -615,7 +615,7 @@ class unbounded_circular_list final {
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
         node_ptr new_node = &*it_;
         // the body of the cas loop un-rolled once (same as below)
-        counted_end_link old             = sentinel.load ( std::memory_order_relaxed );
+        counted_sentinel old             = sentinel.load ( std::memory_order_relaxed );
         unsigned char new_aba_id         = std::exchange ( *( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0 ) + 1;
         *( ( counted_link * ) new_node ) = counted_link{ link{ ( link * ) old.node, old.node->next }, 1 };
         if constexpr ( std::is_same<at::front, At>::value )
