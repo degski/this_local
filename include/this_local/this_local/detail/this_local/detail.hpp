@@ -604,22 +604,20 @@ class unbounded_circular_list final {
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
         node_ptr new_node = &*it_;
         // the body of the cas loop un-rolled once (same as below)
-        counted_node_link old = sentinel.load ( std::memory_order_relaxed );
-        unsigned char new_aba = std::exchange ( *( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0 );
-        new_aba += 1;
+        counted_node_link old            = sentinel.load ( std::memory_order_relaxed );
+        unsigned char new_aba            = std::exchange ( *( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0 ) + 1;
         *( ( counted_link * ) new_node ) = { ( counted_link * ) old.node, ( counted_link * ) old.node->next };
         if constexpr ( std::is_same<at::front, At>::value )
             store_sentinel ( old.node, { old.node->prev, new_node }, new_aba );
         else
             store_sentinel ( new_node, { old.node->prev, new_node }, new_aba );
         // end of un-rolled loop
-
         while ( not dwcas ( *( ( volatile uint128_t * ) old.node ), make_m128 ( sentinel.load ( std::memory_order_relaxed ) ),
                             *( ( uint128_t * ) new_node ) ) ) {
             old = sentinel.load ( std::memory_order_relaxed );
             std::memset ( ( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0, 1 );
             *( ( counted_link * ) new_node ) = { ( counted_link * ) old.node, ( counted_link * ) old.node->next };
-            if constexpr ( std::is_same<at::front, At>::value )
+            if constexpr ( std::is_same<At, at::front>::value )
                 store_sentinel ( old.node, { old.node->prev, new_node }, new_aba );
             else
                 store_sentinel ( new_node, { old.node->prev, new_node }, new_aba );
@@ -635,7 +633,7 @@ class unbounded_circular_list final {
         *( ( counted_link * ) new_node ) = { &end_link, &end_link, 1 };
         end_link.prev = end_link.next = ( counted_link * ) new_node;
         end_link.node                 = nullptr;
-        if constexpr ( std::is_same<at::front, At>::value ) {
+        if constexpr ( std::is_same<At, at::front>::value ) {
             store_sentinel ( ( node_ptr ) &end_link, { ( counted_link * ) &end_link, ( counted_link * ) &end_link }, 1 );
             insert_front_implementation = &unbounded_circular_list::insert_regular_implementation<at::front>;
         }
