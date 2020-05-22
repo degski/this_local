@@ -347,15 +347,13 @@ struct slim_rw_lock final {
     ;                                                                                                                              \
     ;
 
-namespace at {
-struct front {};
-struct back {};
-}; // namespace at
-
 alignas ( 64 ) inline static lockless::spin_rw_lock<long long> global_mutex;
 
+struct front_insertion {};
+struct back_insertion {};
+
 namespace lockless {
-template<typename ValueType, typename Allocator = std::allocator<ValueType>, typename DefaultInsertionMode = at::back>
+template<typename ValueType, typename Allocator = std::allocator<ValueType>, typename DefaultInsertionMode = back_insertion>
 class unbounded_circular_list final {
 
     public:
@@ -363,8 +361,12 @@ class unbounded_circular_list final {
     using allocator              = Allocator;
     using default_insertion_mode = DefaultInsertionMode;
 
-    using pointer         = ValueType *;
-    using const_pointer   = ValueType const *;
+    struct front_insertion {};
+    struct back_insertion {};
+
+    using pointer       = ValueType *;
+    using const_pointer = ValueType const *;
+
     using reference       = ValueType &;
     using const_reference = ValueType const &;
 
@@ -438,15 +440,22 @@ class unbounded_circular_list final {
     using counted_end_link_ptr       = counted_sentinel *;
     using const_counted_end_link_ptr = counted_sentinel const *;
 
-    private:
     using nodes_type = plf::colony<node, typename Allocator::template rebind<node>::other>;
+
+    // exposes the underlying container
 
     using nodes_iterator       = typename nodes_type::iterator;
     using nodes_const_iterator = typename nodes_type::const_iterator;
 
+    [[nodiscard]] nodes_const_iterator nodes_begin ( ) const noexcept { return nodes.begin ( ); }
+    [[nodiscard]] nodes_const_iterator nodes_cbegin ( ) const noexcept { return nodes.cbegin ( ); }
+    [[nodiscard]] nodes_iterator nodes_begin ( ) noexcept { return nodes.begin ( ); }
+    [[nodiscard]] nodes_const_iterator nodes_end ( ) const noexcept { return nodes.end ( ); }
+    [[nodiscard]] nodes_const_iterator nodes_cend ( ) const noexcept { return nodes.cend ( ); }
+    [[nodiscard]] nodes_iterator nodes_end ( ) noexcept { return nodes.end ( ); }
+
     // class variables
 
-    public:
     alignas ( 64 ) spin_rw_lock<long long> instance;
 
     private:
@@ -461,9 +470,8 @@ class unbounded_circular_list final {
 
     public:
     unbounded_circular_list ( ) :
-        insert_front_implementation{ &unbounded_circular_list::insert_init_implementation<at::front> }, insert_back_implementation{
-            &unbounded_circular_list::insert_init_implementation<at::back>
-        } {}
+        insert_front_implementation{ &unbounded_circular_list::insert_init_implementation<front_insertion> },
+        insert_back_implementation{ &unbounded_circular_list::insert_init_implementation<back_insertion> } {}
 
     unbounded_circular_list ( value_type const & data_ ) {
         insert_init_implementation<DefaultInsertionMode> ( nodes.emplace ( data_ ) );
@@ -500,7 +508,7 @@ class unbounded_circular_list final {
         counted_sentinel old             = sentinel.load ( std::memory_order_relaxed );
         unsigned char new_aba_id         = std::exchange ( *( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0 ) + 1;
         *( ( counted_link * ) new_node ) = counted_link{ link{ ( link * ) old.node, old.node->next }, 1 };
-        if constexpr ( std::is_same<at::front, At>::value )
+        if constexpr ( std::is_same<front_insertion, At>::value )
             store_sentinel ( old.node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
         else
             store_sentinel ( new_node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
@@ -510,7 +518,7 @@ class unbounded_circular_list final {
             old = sentinel.load ( std::memory_order_relaxed );
             std::memset ( ( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0, 1 );
             *( ( counted_link * ) new_node ) = counted_link{ link{ ( link * ) old.node, old.node->next }, 1 };
-            if constexpr ( std::is_same<at::front, At>::value )
+            if constexpr ( std::is_same<front_insertion, At>::value )
                 store_sentinel ( old.node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
             else
                 store_sentinel ( new_node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
@@ -525,13 +533,13 @@ class unbounded_circular_list final {
         node_ptr new_node                = &*it_;
         *( ( counted_link * ) new_node ) = counted_link{ link{ &end_link, &end_link }, 1 };
         end_link                         = link{ ( link * ) new_node, ( link * ) new_node };
-        if constexpr ( std::is_same<At, at::front>::value ) {
+        if constexpr ( std::is_same<At, front_insertion>::value ) {
             store_sentinel ( ( node_ptr ) &end_link, counted_link{ link{ &end_link, &end_link }, 1 } );
-            insert_front_implementation = &unbounded_circular_list::insert_regular_implementation<at::front>;
+            insert_front_implementation = &unbounded_circular_list::insert_regular_implementation<front_insertion>;
         }
         else {
             store_sentinel ( new_node, counted_link{ link{ &end_link, &end_link }, 1 } );
-            insert_back_implementation = &unbounded_circular_list::insert_regular_implementation<at::back>;
+            insert_back_implementation = &unbounded_circular_list::insert_regular_implementation<back_insertion>;
         }
         return std::forward<nodes_iterator> ( it_ );
     }
@@ -549,20 +557,20 @@ class unbounded_circular_list final {
     }
 
     [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) {
-        if constexpr ( std::is_same<DefaultInsertionMode, at::front>::value )
+        if constexpr ( std::is_same<DefaultInsertionMode, front_insertion>::value )
             return push_front ( data_ );
         else
             return push_back ( data_ );
     }
     [[maybe_unused]] nodes_iterator push ( value_type && data_ ) {
-        if constexpr ( std::is_same<DefaultInsertionMode, at::front>::value )
+        if constexpr ( std::is_same<DefaultInsertionMode, front_insertion>::value )
             return push_front ( std::forward<value_type> ( data_ ) );
         else
             return push_back ( std::forward<value_type> ( data_ ) );
     }
     template<typename... Args>
     [[maybe_unused]] nodes_iterator emplace ( Args &&... args_ ) {
-        if constexpr ( std::is_same<DefaultInsertionMode, at::front>::value )
+        if constexpr ( std::is_same<DefaultInsertionMode, front_insertion>::value )
             return push_front ( std::forward<Args> ( args_ )... );
         else
             return emplace_back ( std::forward<Args> ( args_ )... );
