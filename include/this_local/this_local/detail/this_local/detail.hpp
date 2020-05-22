@@ -529,12 +529,12 @@ class unbounded_circular_list final {
     using node_ptr       = node *;
     using const_node_ptr = node const *;
 
-    struct counted_node_link final : public counted_link {
+    struct counted_end_link final : public counted_link {
 
-        node_ptr node = nullptr;
+        node_ptr node = nullptr; // a sentinel value
 
         template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, counted_node_link const & link_ ) noexcept {
+        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, counted_end_link const & link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
             std::scoped_lock lock ( global_mutex );
             out_ << '<' << ap ( &link_ ) << ' ' << ap ( link_->prev ) << ' ' << ap ( link_->next ) << '.' << link_->external_count
@@ -542,14 +542,11 @@ class unbounded_circular_list final {
             return out_;
         }
 
-        [[nodiscard]] bool operator== ( counted_link const & r_ ) const noexcept {
-            return equal_m128 ( this, &r_ );
-            // counted_link::prev == r_.prev and counted_link::next == r_.next;
-        }
+        [[nodiscard]] bool operator== ( counted_link const & r_ ) const noexcept { return equal_m128 ( this, &r_ ); }
     };
 
-    using counted_node_link_ptr       = counted_node_link *;
-    using const_counted_node_link_ptr = counted_node_link const *;
+    using counted_end_link_ptr       = counted_end_link *;
+    using const_counted_end_link_ptr = counted_end_link const *;
 
     private:
     using nodes_type = plf::colony<node, typename Allocator::template rebind<node>::other>;
@@ -563,10 +560,10 @@ class unbounded_circular_list final {
     alignas ( 64 ) spin_rw_lock<long long> instance;
 
     private:
-    alignas ( 64 ) std::atomic<counted_node_link> sentinel; // the work-horse
+    alignas ( 64 ) std::atomic<counted_end_link> sentinel; // the work-horse
 
     nodes_type nodes;
-    counted_node_link end_link;
+    link end_link;
     nodes_iterator ( unbounded_circular_list::*insert_front_implementation ) ( nodes_iterator && ) noexcept;
     nodes_iterator ( unbounded_circular_list::*insert_back_implementation ) ( nodes_iterator && ) noexcept;
 
@@ -610,23 +607,24 @@ class unbounded_circular_list final {
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
         node_ptr new_node = &*it_;
         // the body of the cas loop un-rolled once (same as below)
-        counted_node_link old            = sentinel.load ( std::memory_order_relaxed );
-        unsigned char new_aba            = std::exchange ( *( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0 ) + 1;
-        *( ( counted_link * ) new_node ) = { { ( counted_link * ) old.node, ( counted_link * ) old.node->next } };
+        counted_end_link old  = sentinel.load ( std::memory_order_relaxed );
+        unsigned char new_aba = std::exchange ( *( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0 ) + 1;
+        *( ( counted_link * ) new_node ) =
+            counted_link{ link{ ( counted_link * ) old.node, ( counted_link * ) old.node->next }, 1 };
         if constexpr ( std::is_same<at::front, At>::value )
-            store_sentinel ( old.node, { { old.node->prev, new_node } }, new_aba );
+            store_sentinel ( old.node, counted_link{ link{ old.node->prev, new_node }, 1 }, new_aba );
         else
-            store_sentinel ( new_node, { { old.node->prev, new_node } }, new_aba );
+            store_sentinel ( new_node, counted_link{ link{ old.node->prev, new_node }, 1 }, new_aba );
         // end of un-rolled loop
         while ( not dwcas ( ( ( volatile uint128_t * ) old.node ), make_m128 ( sentinel.load ( std::memory_order_relaxed ) ),
                             ( ( uint128_t * ) new_node ) ) ) {
             old = sentinel.load ( std::memory_order_relaxed );
             std::memset ( ( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0, 1 );
-            *( ( counted_link * ) new_node ) = { { ( counted_link * ) old.node, ( counted_link * ) old.node->next } };
-            if constexpr ( std::is_same<At, at::front>::value )
-                store_sentinel ( old.node, { { old.node->prev, new_node } }, new_aba );
+            *( ( counted_link * ) new_node ) = counted_link{ link{ ( link * ) old.node, ( link * ) old.node->next }, 1 };
+            if constexpr ( std::is_same<at::front, At>::value )
+                store_sentinel ( old.node, counted_link{ link{ old.node->prev, new_node }, 1 }, new_aba );
             else
-                store_sentinel ( new_node, { { old.node->prev, new_node } }, new_aba );
+                store_sentinel ( new_node, counted_link{ link{ old.node->prev, new_node }, 1 }, new_aba );
         }
         new_node->next->prev = new_node;
         return std::forward<nodes_iterator> ( it_ );
@@ -636,15 +634,14 @@ class unbounded_circular_list final {
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_init_implementation ( nodes_iterator && it_ ) noexcept {
         std::scoped_lock lock ( instance );
         node_ptr new_node                = &*it_;
-        *( ( counted_link * ) new_node ) = { { &end_link, &end_link } };
-        end_link.prev = end_link.next = ( counted_link * ) new_node;
-        end_link.node                 = nullptr;
+        *( ( counted_link * ) new_node ) = counted_link{ link{ &end_link, &end_link }, 1 };
+        end_link                         = link{ ( link * ) new_node, ( link * ) new_node };
         if constexpr ( std::is_same<At, at::front>::value ) {
-            store_sentinel ( ( node_ptr ) &end_link, { { ( counted_link * ) &end_link, ( counted_link * ) &end_link } }, 1 );
+            store_sentinel ( ( node_ptr ) &end_link, counted_link{ link{ ( link * ) &end_link, ( link * ) &end_link }, 1 } );
             insert_front_implementation = &unbounded_circular_list::insert_regular_implementation<at::front>;
         }
         else {
-            store_sentinel ( new_node, { { &end_link, &end_link } }, 1 );
+            store_sentinel ( new_node, counted_link{ link{ ( link * ) &end_link, ( link * ) &end_link }, 1 } );
             insert_back_implementation = &unbounded_circular_list::insert_regular_implementation<at::back>;
         }
         return std::forward<nodes_iterator> ( it_ );
@@ -694,7 +691,6 @@ class unbounded_circular_list final {
     }
 
     class alignas ( 16 ) iterator final {
-
         friend class unbounded_circular_list;
 
         node_ptr node, end_node;
@@ -736,7 +732,6 @@ class unbounded_circular_list final {
     };
 
     class alignas ( 16 ) const_iterator final {
-
         friend class unbounded_circular_list;
 
         const_node_ptr node, end_node;
@@ -878,7 +873,7 @@ class unbounded_circular_list final {
     }
 
     static constexpr int offset_data = static_cast<int> ( offsetof ( node, data ) );
-};
+}; // namespace lockless
 
 } // namespace lockless
 
