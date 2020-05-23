@@ -138,25 +138,25 @@ inline bool const LITTLE_ENDIAN = is_little_endian ( );
 
 // Instruction-reordering can occur when f.e. emplacing repeatedly into a vector (also in one thread). Fences have only
 // relevance in a multithreading environment, and can solve this problem, but come with their cost, and is not a general
-// solution. Atomics ands cas-operations can contribute to helping this problem. In 'real'-use-cases, the comparants will
-// often involve either (atomic variable based) spinlocks and/or cas instructions, which will make this problem never
-// appear in the firat place. Just saying :) .
+// solution. Atomics and cas-operations can contribute to helping solving this problem. In 'real'-use-cases, the comparants
+// will often involve either (atomic variable based) spinlocks and/or cas-operations, either of which will make this
+// problem never appear in the firat place. Just saying :)
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m128 ( void const * const a_, void const * const b_ ) noexcept {
     return not _mm_movemask_pd ( _mm_cmpneq_pd ( _mm_load_pd ( ( double * ) a_ ), _mm_load_pd ( ( double * ) b_ ) ) );
 }
 // Instruction-reordering can occur when f.e. emplacing repeatedly into a vector (also in one thread). Fences have only
 // relevance in a multithreading environment, and can solve this problem, but come with their cost, and is not a general
-// solution. Atomics ands cas-operations can contribute to helping this problem. In 'real'-use-cases, the comparants will
-// often involve either (atomic variable based) spinlocks and/or cas instructions, which will make this problem never
-// appear in the firat place. Just saying :) .
+// solution. Atomics and cas-operations can contribute to helping solving this problem. In 'real'-use-cases, the comparants
+// will often involve either (atomic variable based) spinlocks and/or cas-operations, either of which will make this
+// problem never appear in the firat place. Just saying :)
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m192 ( void const * const a_, void const * const b_ ) noexcept {
     return equal_m128 ( a_, b_ ) ? equal_m64 ( ( __m64 * ) a_ + 2, ( __m64 * ) b_ + 2 ) : false;
 }
 // Instruction-reordering can occur when f.e. emplacing repeatedly into a vector (also in one thread). Fences have only
 // relevance in a multithreading environment, and can solve this problem, but come with their cost, and is not a general
-// solution. Atomics ands cas-operations can contribute to helping this problem. In 'real'-use-cases, the comparants will
-// often involve either (atomic variable based) spinlocks and/or cas instructions, which will make this problem never
-// appear in the firat place. Just saying :) .
+// solution. Atomics and cas-operations can contribute to helping solving this problem. In 'real'-use-cases, the comparants
+// will often involve either (atomic variable based) spinlocks and/or cas-operations, either of which will make this
+// problem never appear in the firat place. Just saying :)
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m256 ( void const * const a_, void const * const b_ ) noexcept {
     return not _mm256_movemask_pd (
         _mm256_cmp_pd ( _mm256_load_pd ( ( double const * ) a_ ), _mm256_load_pd ( ( double const * ) b_ ), _CMP_NEQ_UQ ) );
