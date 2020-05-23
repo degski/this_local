@@ -326,15 +326,15 @@ std::vector<aligned_pair<std::uint64_t>> random_vector ( std::size_t length_ ) {
     return v;
 }
 
-int main ( ) {
+int main86989 ( ) {
 
-    constexpr std::size_t N = 100;
+    constexpr std::size_t N = 1;
 
     auto pr1 = random_vector ( 12 * N );
     auto pr2 = random_vector ( 12 * N );
 
     std::uint64_t * pr1p = { reinterpret_cast<std::uint64_t *> ( pr1.data ( ) ) };
-    std::uint64_t * pr2p = { reinterpret_cast<std::uint64_t *> ( pr2.data ( ) ) };
+    std::uint64_t * pr2p = { reinterpret_cast<std::uint64_t *> ( pr1.data ( ) ) };
 
     {
         std::vector<std::uint64_t> a{ pr1p, pr1p + 12 * N }, b = { pr2p, pr2p + 12 * N };
@@ -390,6 +390,77 @@ int main ( ) {
         timer.start ( );
 
         for ( std::size_t i = 0; i < 12 * N; i += 4 )
+            result = result and sax::equal_m256 ( a.data ( ) + i, b.data ( ) + i );
+
+        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
+        std::cout << std::dec << duration << " ms " << result << nl;
+    }
+
+    return EXIT_SUCCESS;
+}
+
+int main ( ) {
+
+    std::array<std::uint64_t, 12> pr1 = { 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1 };
+    std::array<std::uint64_t, 12> pr2 = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0 };
+
+    std::array<std::uint64_t, 12> p1 = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
+    std::array<std::uint64_t, 12> p2 = { pr2 };
+
+    {
+        std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
+        bool result = true;
+
+        std::uint64_t duration;
+        plf::nanotimer timer;
+        timer.start ( );
+
+        for ( std::size_t i = 0; i < 12; i += 1 )
+            result = result and a[ i ] == b[ i ];
+
+        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
+        std::cout << std::dec << duration << " ms " << result << nl;
+    }
+
+    {
+        std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
+        bool result = true;
+
+        std::uint64_t duration;
+        plf::nanotimer timer;
+        timer.start ( );
+
+        for ( std::size_t i = 0; i < 12; i += 2 )
+            result = result and sax::equal_m128 ( a.data ( ) + i, b.data ( ) + i );
+
+        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
+        std::cout << std::dec << duration << " ms " << result << nl;
+    }
+
+    {
+        std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
+        bool result = true;
+
+        std::uint64_t duration;
+        plf::nanotimer timer;
+        timer.start ( );
+
+        for ( std::size_t i = 0; i < 12; i += 3 )
+            result = result and sax::equal_m192 ( a.data ( ) + i, b.data ( ) + i );
+
+        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
+        std::cout << std::dec << duration << " ms " << result << nl;
+    }
+
+    {
+        std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
+        bool result = true;
+
+        std::uint64_t duration;
+        plf::nanotimer timer;
+        timer.start ( );
+
+        for ( std::size_t i = 0; i < 12; i += 4 )
             result = result and sax::equal_m256 ( a.data ( ) + i, b.data ( ) + i );
 
         duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );

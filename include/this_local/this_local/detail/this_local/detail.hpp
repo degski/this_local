@@ -144,7 +144,7 @@ inline bool const LITTLE_ENDIAN = is_little_endian ( );
 }
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m256 ( void const * const a_, void const * const b_ ) noexcept {
     return not _mm256_movemask_pd (
-        _mm256_cmp_pd ( _mm256_load_pd ( ( double const * ) a_ ), _mm256_load_pd ( ( double const * ) b_ ), 1 ) );
+        _mm256_cmp_pd ( _mm256_load_pd ( ( double const * ) a_ ), _mm256_load_pd ( ( double const * ) b_ ), _CMP_NEQ_UQ ) );
 }
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m64 ( void const * const a_, void const * const b_ ) noexcept {
