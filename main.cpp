@@ -326,9 +326,9 @@ std::vector<aligned_pair<std::uint64_t>> random_vector ( std::size_t length_ ) {
     return v;
 }
 
-int main86989 ( ) {
+int main568577 ( ) {
 
-    constexpr std::size_t N = 1;
+    constexpr std::size_t N = 100;
 
     auto pr1 = random_vector ( 12 * N );
     auto pr2 = random_vector ( 12 * N );
@@ -401,14 +401,14 @@ int main86989 ( ) {
 
 int main ( ) {
 
-    std::array<std::uint64_t, 12> pr1 = { 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1 };
-    std::array<std::uint64_t, 12> pr2 = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0 };
+    alignas ( 16 ) std::array<std::uint64_t, 12> pr1 = { 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1 };
+    alignas ( 16 ) std::array<std::uint64_t, 12> pr2 = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0 };
 
-    std::array<std::uint64_t, 12> p1 = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
-    std::array<std::uint64_t, 12> p2 = { pr2 };
+    alignas ( 16 ) std::array<std::uint64_t, 12> p1 = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
+    alignas ( 16 ) std::array<std::uint64_t, 12> p2 = { p1 };
 
     {
-        std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
+        alignas ( 16 ) std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
         bool result = true;
 
         std::uint64_t duration;
@@ -423,7 +423,7 @@ int main ( ) {
     }
 
     {
-        std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
+        alignas ( 16 ) std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
         bool result = true;
 
         std::uint64_t duration;
@@ -438,7 +438,7 @@ int main ( ) {
     }
 
     {
-        std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
+        alignas ( 16 ) std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
         bool result = true;
 
         std::uint64_t duration;
@@ -453,7 +453,7 @@ int main ( ) {
     }
 
     {
-        std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
+        alignas ( 16 ) std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
         bool result = true;
 
         std::uint64_t duration;
