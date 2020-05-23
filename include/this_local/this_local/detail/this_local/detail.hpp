@@ -354,7 +354,7 @@ template<typename MutexType>
     return true;
 }
 
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( volatile _m128 * dest_, _m128 ex_new_, _m128 * cr_old_ ) noexcept {
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( _m128 volatile * dest_, _m128 ex_new_, _m128 * cr_old_ ) noexcept {
 #if ( defined( __clang__ ) or defined( __GNUC__ ) )
     bool value;
     __asm__ __volatile__( "lock cmpxchg16b %1\n\t"
@@ -365,7 +365,7 @@ template<typename MutexType>
                           : "cc" );
     return value;
 #else
-    return _InterlockedCompareExchange128 ( ( volatile long long * ) dest_, ex_new_.m128_long64[ hi_index<short> ( ) ],
+    return _InterlockedCompareExchange128 ( ( long long volatile * ) dest_, ex_new_.m128_long64[ hi_index<short> ( ) ],
                                             ex_new_.m128_long64[ not hi_index<short> ( ) ], ( long long * ) cr_old_ );
 #endif
 }
@@ -388,6 +388,39 @@ HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
     _mm_pause ( );
 #else
 #    error support for the babbage engine has ended
+#endif
+}
+
+// With a big Thanks to Google Benchmark (the people).
+//
+// The do_not_optimize (...) function can be used to prevent a value or
+// expression from being optimized away by the compiler. This function is
+// intended to add little to no overhead.
+// See: https://youtu.be/nXaxk27zwlk?t=2441
+namespace detail {
+inline void use_char_pointer ( char const volatile * ) noexcept {}
+} // namespace detail
+template<typename Anything>
+HEDLEY_ALWAYS_INLINE void do_not_optimize ( Anything * value_ ) noexcept {
+#if defined( _MSC_VER )
+    detail::use_char_pointer ( &reinterpret_cast<char const volatile &> ( value_ ) );
+    _ReadWriteBarrier ( );
+#elif defined( __clang__ )
+    asm volatile( "" : "+r,m"( value_ ) : : "memory" );
+#else
+    asm volatile( "" : "+m,r"( value_ ) : : "memory" );
+#endif
+}
+
+// With a big Thanks to Google Benchmark (the people).
+//
+// Force the compiler to flush pending writes to global memory. Acts as an
+// effective read/write barrier
+HEDLEY_ALWAYS_INLINE void clobber_memory ( ) noexcept {
+#if defined( _MSC_VER )
+    _ReadWriteBarrier ( );
+#else
+    asm volatile( "" : : : "memory" );
 #endif
 }
 
@@ -639,7 +672,7 @@ class unbounded_circular_list final {
         else
             store_sentinel ( new_node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
         // end of un-rolled loop
-        while ( not dwcas ( ( ( volatile _m128 * ) old.node ), make_m128 ( sentinel.load ( std::memory_order_relaxed ) ),
+        while ( not dwcas ( ( ( _m128 volatile * ) old.node ), make_m128 ( sentinel.load ( std::memory_order_relaxed ) ),
                             ( ( _m128 * ) new_node ) ) ) {
             old = sentinel.load ( std::memory_order_relaxed );
             std::memset ( ( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0, 1 );
