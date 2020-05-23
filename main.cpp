@@ -460,7 +460,7 @@ int main6585867 ( ) {
     }
 
     {
-        alignas ( 16 ) std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
+        alignas ( 32 ) std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
         bool result = true;
 
         std::uint64_t duration;
