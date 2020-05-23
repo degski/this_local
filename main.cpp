@@ -326,7 +326,7 @@ std::vector<aligned_pair<std::uint64_t>> random_vector ( std::size_t length_ ) {
     return v;
 }
 
-int main ( ) {
+int main7967 ( ) {
 
     constexpr std::size_t N = 100;
 
@@ -406,71 +406,76 @@ int main ( ) {
     C:\Program Files\LLVM\lib\clang\10.0.0\lib\windows\clang_rt.asan-x86_64.lib
 */
 
-int main6585867 ( ) {
+int main ( ) {
 
-    alignas ( 16 ) std::array<std::uint64_t, 12> pr1 = { 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1 };
-    alignas ( 16 ) std::array<std::uint64_t, 12> pr2 = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0 };
+    alignas ( 16 ) std::array<std::uint64_t, 24> pr1 = { 24, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1,
+                                                         24, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1 };
+    alignas ( 16 ) std::array<std::uint64_t, 24> pr2 = {
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0
+    };
 
-    alignas ( 16 ) std::array<std::uint64_t, 12> p1 = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
-    alignas ( 16 ) std::array<std::uint64_t, 12> p2 = { p1 };
+    alignas ( 16 ) std::array<std::uint64_t, 24> p1 = {
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 24, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 24
+    };
+    alignas ( 16 ) std::array<std::uint64_t, 24> p2 = { p1 };
 
     {
-        alignas ( 16 ) std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
+        alignas ( 16 ) std::array<std::uint64_t, 24> a{ p1 }, b = { p2 };
         bool result = true;
 
         std::uint64_t duration;
         plf::nanotimer timer;
         timer.start ( );
 
-        for ( std::size_t i = 0; i < 12; i += 1 )
+        for ( std::size_t i = 0; i < 24; i += 1 )
             result = result and a[ i ] == b[ i ];
 
-        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
+        duration = static_cast<std::uint64_t> ( timer.get_elapsed_ns ( ) );
         std::cout << std::dec << duration << " ms " << result << nl;
     }
 
     {
-        alignas ( 16 ) std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
+        alignas ( 16 ) std::array<std::uint64_t, 24> a{ p1 }, b = { p2 };
         bool result = true;
 
         std::uint64_t duration;
         plf::nanotimer timer;
         timer.start ( );
 
-        for ( std::size_t i = 0; i < 12; i += 2 )
+        for ( std::size_t i = 0; i < 24; i += 2 )
             result = result and sax::equal_m128 ( a.data ( ) + i, b.data ( ) + i );
 
-        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
+        duration = static_cast<std::uint64_t> ( timer.get_elapsed_ns ( ) );
         std::cout << std::dec << duration << " ms " << result << nl;
     }
 
     {
-        alignas ( 16 ) std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
+        alignas ( 16 ) std::array<std::uint64_t, 24> a{ p1 }, b = { p2 };
         bool result = true;
 
         std::uint64_t duration;
         plf::nanotimer timer;
         timer.start ( );
 
-        for ( std::size_t i = 0; i < 12; i += 3 )
+        for ( std::size_t i = 0; i < 24; i += 3 )
             result = result and sax::equal_m192 ( a.data ( ) + i, b.data ( ) + i );
 
-        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
+        duration = static_cast<std::uint64_t> ( timer.get_elapsed_ns ( ) );
         std::cout << std::dec << duration << " ms " << result << nl;
     }
 
     {
-        alignas ( 32 ) std::array<std::uint64_t, 12> a{ p1 }, b = { p2 };
+        alignas ( 32 ) std::array<std::uint64_t, 24> a{ p1 }, b = { p2 };
         bool result = true;
 
         std::uint64_t duration;
         plf::nanotimer timer;
         timer.start ( );
 
-        for ( std::size_t i = 0; i < 12; i += 4 )
+        for ( std::size_t i = 0; i < 24; i += 4 )
             result = result and sax::equal_m256 ( a.data ( ) + i, b.data ( ) + i );
 
-        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
+        duration = static_cast<std::uint64_t> ( timer.get_elapsed_ns ( ) );
         std::cout << std::dec << duration << " ms " << result << nl;
     }
 
