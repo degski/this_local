@@ -122,9 +122,17 @@ inline constexpr int hi_index ( ) noexcept {
     return *reinterpret_cast<char *> ( &v ) ? sizeof ( ValueType ) - 1 : 0;
 }
 
+template<typename ValueType>
+inline constexpr int lo_index ( ) noexcept {
+    short v = 1;
+    return not *reinterpret_cast<char *> ( &v ) ? sizeof ( ValueType ) - 1 : 0;
+}
+
 [[nodiscard]] inline constexpr bool is_little_endian ( ) noexcept { return hi_index<short> ( ); }
+[[nodiscard]] inline constexpr bool is_big_endian ( ) noexcept { return lo_index<short> ( ); }
 
 inline bool const LITTLE_ENDIAN = is_little_endian ( );
+inline bool const BIG_ENDIAN    = is_big_endian ( );
 
 // https://godbolt.org/z/efTuAz https://godbolt.org/z/XQYNzT
 
@@ -181,53 +189,141 @@ inline bool const LITTLE_ENDIAN = is_little_endian ( );
     return not equal_m384 ( a_, b_ );
 }
 
-struct alignas ( 16 ) uint128_t {
-#if LITTLE_ENDIAN
-    long long lo;
-    long long hi;
-#else
-    long long hi;
-    long long lo;
+union alignas ( 8 ) _m64 {
+
+    __m64 m64_m64;
+    __int32 m64_m32[ 4 ];
+
+    _m64 ( ) = default;
+
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m64 )>>
+    _m64 ( ValueType const & v_ ) noexcept {
+        memcpy ( this, &v_, sizeof ( _m64 ) );
+    }
+
+    template<typename HalfSizeValueType, typename = std::enable_if_t<sizeof ( HalfSizeValueType ) >= sizeof ( __m64 )>>
+    _m64 ( HalfSizeValueType const & o0_, HalfSizeValueType const & o1_ ) noexcept {
+        memcpy ( m64_m32 + 0, &o0_, sizeof ( __int32 ) );
+        memcpy ( m64_m32 + 1, &o1_, sizeof ( __int32 ) );
+    };
+
+    ~_m64 ( ) = default;
+
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m64 )>>
+    std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m64 ), _m64> operator= ( ValueType const & v_ ) noexcept {
+        memcpy ( this, &v_, sizeof ( _m64 ) );
+        return *this;
+    }
+
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m64 )>>
+    [[nodiscard]] bool operator== ( ValueType const & r_ ) const noexcept {
+        return equal_m64 ( this, &r_ );
+    }
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m64 )>>
+    [[nodiscard]] bool operator!= ( ValueType const & r_ ) const noexcept {
+        return unequal_m64 ( this, &r_ );
+    }
+
+    template<typename ValueType>
+    _m64 ( ValueType && ) = delete;
+    template<typename ValueType>
+    [[nodiscard]] _m64 operator= ( ValueType && ) = delete;
+};
+union alignas ( 16 ) _m128 {
+
+    __m128 m128_m128;
+    __m64 m128_m64[ 2 ];
+    __int32 m128_m32[ 4 ];
+#if defined( _MSC_VER )
+    LONG64 m128_long64[ 2 ];
 #endif
+
+    _m128 ( ) = default;
+
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m128 )>>
+    _m128 ( ValueType const & v_ ) noexcept {
+        memcpy ( this, &v_, sizeof ( _m128 ) );
+    }
+
+    template<typename HalfSizeValueType, typename = std::enable_if_t<sizeof ( HalfSizeValueType ) >= sizeof ( __m64 )>>
+    _m128 ( HalfSizeValueType const & o0_, HalfSizeValueType const & o1_ ) noexcept {
+        memcpy ( m128_m64 + 0, &o0_, sizeof ( __m64 ) );
+        memcpy ( m128_m64 + 1, &o1_, sizeof ( __m64 ) );
+    };
+
+    ~_m128 ( ) = default;
+
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m128 )>>
+    std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m128 ), _m128> operator= ( ValueType const & v_ ) noexcept {
+        memcpy ( this, &v_, sizeof ( _m128 ) );
+        return *this;
+    }
+
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m128 )>>
+    [[nodiscard]] bool operator== ( ValueType const & r_ ) const noexcept {
+        return equal_m128 ( this, &r_ );
+    }
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m128 )>>
+    [[nodiscard]] bool operator!= ( ValueType const & r_ ) const noexcept {
+        return unequal_m128 ( this, &r_ );
+    }
+
+    template<typename ValueType>
+    _m128 ( ValueType && ) = delete;
+    template<typename ValueType>
+    [[nodiscard]] _m128 operator= ( ValueType && ) = delete;
 };
 
-template<typename ValueType>
-uint128_t make_m128 ( ValueType l_ ) noexcept {
-    uint128_t l;
-    memcpy ( &l, &l_, sizeof ( l ) );
-    return l;
-}
+union alignas ( 32 ) _m256 {
 
-struct alignas ( 32 ) uint256_t {
-#if LITTLE_ENDIAN
-    uint128_t lo;
-    uint128_t hi;
-#else
-    uint128_t hi;
-    uint128_t lo;
-#endif
-};
+    __m256 m256_m256;
+    __m128 m256_m128[ 2 ];
+    __m64 m256_m64[ 4 ];
+    __int32 m256_m32[ 8 ];
 
-struct alignas ( 64 ) uint512_t {
-#if LITTLE_ENDIAN
-    uint256_t lo;
-    uint256_t hi;
-#else
-    uint256_t hi;
-    uint256_t lo;
-#endif
+    _m256 ( ) = default;
+
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m256 )>>
+    _m256 ( ValueType const & v_ ) noexcept {
+        memcpy ( this, &v_, sizeof ( _m256 ) );
+    }
+
+    template<typename HalfSizeValueType, typename = std::enable_if_t<sizeof ( HalfSizeValueType ) >= sizeof ( __m256 )>>
+    _m256 ( HalfSizeValueType const & o0_, HalfSizeValueType const & o1_ ) noexcept {
+        memcpy ( m256_m128 + 0, &o0_, sizeof ( __m128 ) );
+        memcpy ( m256_m128 + 1, &o1_, sizeof ( __m128 ) );
+    };
+
+    ~_m256 ( ) = default;
+
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m256 )>>
+    std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m256 ), _m256> operator= ( ValueType const & v_ ) noexcept {
+        memcpy ( this, &v_, sizeof ( _m256 ) );
+        return *this;
+    }
+
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m256 )>>
+    [[nodiscard]] bool operator== ( ValueType const & r_ ) const noexcept {
+        return equal_m256 ( this, &r_ );
+    }
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m256 )>>
+    [[nodiscard]] bool operator!= ( ValueType const & r_ ) const noexcept {
+        return unequal_m256 ( this, &r_ );
+    }
+
+    template<typename ValueType>
+    _m256 ( ValueType && ) = delete;
+    template<typename ValueType>
+    [[nodiscard]] _m256 operator= ( ValueType && ) = delete;
 };
 
 template<typename ValueType>
 using pun_type = std::conditional_t<
-    sizeof ( ValueType ) == 64, uint512_t,
-    std::conditional_t<
-        sizeof ( ValueType ) == 32, uint256_t,
-        std::conditional_t<
-            sizeof ( ValueType ) == 16, uint128_t,
-            std::conditional_t<sizeof ( ValueType ) == 8, uint64_t,
-                               std::conditional_t<sizeof ( ValueType ) == 4, uint32_t,
-                                                  std::conditional_t<sizeof ( ValueType ) == 2, uint16_t, uint8_t>>>>>>;
+    sizeof ( ValueType ) == 32, _m256,
+    std::conditional_t<sizeof ( ValueType ) == 16, _m128,
+                       std::conditional_t<sizeof ( ValueType ) == 8, _m64,
+                                          std::conditional_t<sizeof ( ValueType ) == 4, __int32,
+                                                             std::conditional_t<sizeof ( ValueType ) == 2, __int16, __int8>>>>>;
 
 template<typename ValueType>
 [[nodiscard]] inline pun_type<ValueType> pun_for_fun ( void const * const t_ ) noexcept {
@@ -247,7 +343,7 @@ namespace lockless {
 // other words, wait a little before retrying the CAS.
 
 template<typename MutexType>
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool soft_dwcas ( uint128_t * dest_, uint128_t ex_new_, uint128_t * cr_old_ ) noexcept {
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool soft_dwcas ( _m128 * dest_, _m128 ex_new_, _m128 * cr_old_ ) noexcept {
     alignas ( 64 ) static MutexType cas_mutex;
     std::scoped_lock lock ( cas_mutex );
     bool check = not equal_m128 ( dest_, cr_old_ );
@@ -258,18 +354,19 @@ template<typename MutexType>
     return true;
 }
 
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( volatile uint128_t * dest_, uint128_t ex_new_, uint128_t * cr_old_ ) noexcept {
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( volatile _m128 * dest_, _m128 ex_new_, _m128 * cr_old_ ) noexcept {
 #if ( defined( __clang__ ) or defined( __GNUC__ ) )
     bool value;
     __asm__ __volatile__( "lock cmpxchg16b %1\n\t"
                           "setz %0"
-                          : "=q"( value ), "+m"( dest_ ), "+d"( cr_old_->hi ), "+a"( cr_old_->lo )
-                          : "c"( ex_new_.hi ), "b"( ex_new_.lo )
+                          : "=q"( value ), "+m"( dest_ ), "+d"( cr_old_->m128_m64[ hi_index<short> ( ) ] ),
+                            "+a"( cr_old_->m128_m64[ not hi_index<short> ( ) ] )
+                          : "c"( ex_new_.m128_m64[ hi_index<short> ( ) ] ), "b"( ex_new_.m128_m64[ not hi_index<short> ( ) ] )
                           : "cc" );
     return value;
 #else
-    return _InterlockedCompareExchange128 ( ( volatile long long * ) dest_->lo, ex_new_.hi, ex_new_.lo,
-                                            ( long long * ) cr_old_->lo );
+    return _InterlockedCompareExchange128 ( ( volatile long long * ) dest_, ex_new_.m128_long64[ hi_index<short> ( ) ],
+                                            ex_new_.m128_long64[ not hi_index<short> ( ) ], ( long long * ) cr_old_ );
 #endif
 }
 
@@ -542,8 +639,8 @@ class unbounded_circular_list final {
         else
             store_sentinel ( new_node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
         // end of un-rolled loop
-        while ( not dwcas ( ( ( volatile uint128_t * ) old.node ), make_m128 ( sentinel.load ( std::memory_order_relaxed ) ),
-                            ( ( uint128_t * ) new_node ) ) ) {
+        while ( not dwcas ( ( ( volatile _m128 * ) old.node ), make_m128 ( sentinel.load ( std::memory_order_relaxed ) ),
+                            ( ( _m128 * ) new_node ) ) ) {
             old = sentinel.load ( std::memory_order_relaxed );
             std::memset ( ( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0, 1 );
             *( ( counted_link * ) new_node ) = counted_link{ link{ ( link * ) old.node, old.node->next }, 1 };
@@ -802,13 +899,6 @@ class unbounded_circular_list final {
 }; // namespace lockless
 
 } // namespace lockless
-
-template<typename Stream>
-[[maybe_unused]] Stream & operator<< ( Stream & out_, uint128_t const & i_ ) noexcept {
-    std::scoped_lock lock ( global_mutex );
-    out_ << '<' << i_.lo << ' ' << i_.hi << '>';
-    return out_;
-}
 
 #undef ever
 
