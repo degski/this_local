@@ -138,7 +138,7 @@ inline bool const LITTLE_ENDIAN = is_little_endian ( );
 
 // Instruction-reordering can occur when f.e. emplacing repeatedly into a vector (also in one thread). Fences have only
 // relevance in a multithreading environment, and can solve this problem, but come with their cost, and is not a general
-// solution. Atomics and cas-operations can contribute to helping solving this problem. In 'real'-use-cases, the comparants
+// solution. Atomics and cas-operations can contribute to help solving this problem. In 'real'-use-cases, the comparants
 // will often involve either (atomic variable based) spinlocks and/or cas-operations, either of which will make this
 // problem never appear in the firat place. Just saying :)
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m128 ( void const * const a_, void const * const b_ ) noexcept {
@@ -146,7 +146,7 @@ inline bool const LITTLE_ENDIAN = is_little_endian ( );
 }
 // Instruction-reordering can occur when f.e. emplacing repeatedly into a vector (also in one thread). Fences have only
 // relevance in a multithreading environment, and can solve this problem, but come with their cost, and is not a general
-// solution. Atomics and cas-operations can contribute to helping solving this problem. In 'real'-use-cases, the comparants
+// solution. Atomics and cas-operations can contribute to help solving this problem. In 'real'-use-cases, the comparants
 // will often involve either (atomic variable based) spinlocks and/or cas-operations, either of which will make this
 // problem never appear in the firat place. Just saying :)
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m192 ( void const * const a_, void const * const b_ ) noexcept {
@@ -154,7 +154,7 @@ inline bool const LITTLE_ENDIAN = is_little_endian ( );
 }
 // Instruction-reordering can occur when f.e. emplacing repeatedly into a vector (also in one thread). Fences have only
 // relevance in a multithreading environment, and can solve this problem, but come with their cost, and is not a general
-// solution. Atomics and cas-operations can contribute to helping solving this problem. In 'real'-use-cases, the comparants
+// solution. Atomics and cas-operations can contribute to help solving this problem. In 'real'-use-cases, the comparants
 // will often involve either (atomic variable based) spinlocks and/or cas-operations, either of which will make this
 // problem never appear in the firat place. Just saying :)
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m256 ( void const * const a_, void const * const b_ ) noexcept {
