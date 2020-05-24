@@ -816,7 +816,7 @@ class unbounded_circular_list final {
         }
         [[maybe_unused]] iterator & operator-- ( ) noexcept {
             if ( not node->prev )
-                repair_links_prev ( ( node_ptr ) node );
+                repair_links_prev ( node );
             node = ( node_ptr ) node->prev;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
                 node = node->prev;
@@ -840,7 +840,7 @@ class unbounded_circular_list final {
                 std::forward<long long> ( end_passes_ )
             } {}
 
-        void repair_links_prev ( const_node_ptr node_ ) noexcept {
+        void repair_links_prev ( node_ptr node_ ) noexcept {
             if ( HEDLEY_LIKELY ( node_ ) ) {
                 counted_link * node = node_->next_;
                 while ( HEDLEY_LIKELY ( node != ( ( node_ptr ) node_ ) ) ) {
