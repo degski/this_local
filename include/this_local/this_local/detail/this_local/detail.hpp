@@ -745,7 +745,13 @@ class unbounded_circular_list final {
     void delete_order_relaxed ( node_ptr node_ ) noexcept { delete_node<false> ( std::forward<node_ptr> ( node_ ) ); }
     void delete_order_acquire ( node_ptr node_ ) noexcept { delete_node<true> ( std::forward<node_ptr> ( node_ ) ); }
 
-    void repair_back_links ( ) {}
+    void repair_all_link_prev ( node_ptr node_ ) noexcept {
+        counted_link * node = node_->next_;
+        while ( node != node_ ) {
+            node->prev = ( counted_link * ) node;
+            node       = node->next;
+        }
+    }
 
     public:
     void pop ( ) noexcept {
@@ -808,6 +814,8 @@ class unbounded_circular_list final {
             return *this;
         }
         [[maybe_unused]] iterator & operator-- ( ) noexcept {
+            if ( not node->prev )
+                repair_all_link_prev ( ( node_ptr ) node );
             node = ( node_ptr ) node->prev;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
                 node = node->prev;
@@ -857,6 +865,8 @@ class unbounded_circular_list final {
             return *this;
         }
         [[maybe_unused]] const_iterator & operator-- ( ) noexcept {
+            if ( not node->prev )
+                repair_all_link_prev ( ( node_ptr ) node );
             node = node->prev;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
                 node = ( node_ptr ) node->prev;
