@@ -729,6 +729,7 @@ class unbounded_circular_list final {
         return ( this->*insert_front_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
+    private:
     template<bool MemoryOrderAcquire>
     void delete_node ( node_ptr node_ ) noexcept {
         if constexpr ( MemoryOrderAcquire )
@@ -741,6 +742,12 @@ class unbounded_circular_list final {
         nodes.erase ( nodes.get_iterator_from_pointer ( node_ ) );
     }
 
+    void delete_order_relaxed ( node_ptr node_ ) noexcept { delete_node<false> ( std::forward<node_ptr> ( node_ ) ); }
+    void delete_order_acquire ( node_ptr node_ ) noexcept { delete_node<true> ( std::forward<node_ptr> ( node_ ) ); }
+
+    void repair_back_links ( ) {}
+
+    public:
     void pop ( ) noexcept {
         counted_sentinel volatile old_sentinel = sentinel.load ( std::memory_order_relaxed );
         for ( ever ) {
@@ -758,12 +765,12 @@ class unbounded_circular_list final {
                                  ( _m128 * ) &node->next ) ) {
                     unsigned long count_increase = old_sentinel.external_count - 2;
                     if ( node->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
-                        delete_node<false> ( node );
+                        delete_order_relaxed ( node );
                     return;
                 }
                 else {
                     if ( node->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 )
-                        delete_node<true> ( node );
+                        delete_order_acquire ( node );
                 }
             }
             else {
