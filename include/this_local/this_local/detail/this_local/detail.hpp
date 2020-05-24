@@ -518,7 +518,7 @@ class unbounded_circular_list final {
         link *prev, *next;
 
         template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, link const & link_ ) noexcept {
+        [[maybe_unused]] friend std::enable_if_t<SAX_USE_IO, Stream &> operator<< ( Stream & out_, link const & link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
             std::scoped_lock lock ( global_mutex );
             out_ << '<' << ap ( link_.prev ) << ' ' << ap ( link_.next ) << '>';
@@ -530,7 +530,8 @@ class unbounded_circular_list final {
         unsigned long external_count;
 
         template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, counted_link const & link_ ) noexcept {
+        [[maybe_unused]] friend std::enable_if_t<SAX_USE_IO, Stream &> operator<< ( Stream & out_,
+                                                                                    counted_link const & link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
             std::scoped_lock lock ( global_mutex );
             out_ << '<' << ap ( link_.prev ) << ' ' << ap ( link_.next ) << '.' << link_.external_count << '>';
@@ -548,7 +549,7 @@ class unbounded_circular_list final {
         node ( Args &&... args_ ) : counted_link{ }, data{ std::forward<Args> ( args_ )... } {}
 
         template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const * link_ ) noexcept {
+        [[maybe_unused]] friend std::enable_if_t<SAX_USE_IO, Stream &> operator<< ( Stream & out_, node const * link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
             std::scoped_lock lock ( global_mutex );
             out_ << '<' << ap ( &*link_ ) << ' ' << ap ( link_->prev ) << ' ' << ap ( link_->next ) << '.' << link_->external_count
@@ -556,7 +557,7 @@ class unbounded_circular_list final {
             return out_;
         }
         template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const & link_ ) noexcept {
+        [[maybe_unused]] friend std::enable_if_t<SAX_USE_IO, Stream &> operator<< ( Stream & out_, node const & link_ ) noexcept {
             return operator<< ( out_, &link_ );
         }
 
@@ -570,7 +571,8 @@ class unbounded_circular_list final {
         node_ptr node = nullptr; // a sentinel value, the last node added
 
         template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, counted_sentinel const & link_ ) noexcept {
+        [[maybe_unused]] friend std::enable_if_t<SAX_USE_IO, Stream &> operator<< ( Stream & out_,
+                                                                                    counted_sentinel const & link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
             std::scoped_lock lock ( global_mutex );
             out_ << '<' << ap ( &link_ ) << ' ' << ap ( link_->prev ) << ' ' << ap ( link_->next ) << '.' << link_->external_count
