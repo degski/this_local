@@ -753,7 +753,7 @@ class unbounded_circular_list final {
             } while ( not dwcas ( ( _m128 volatile * ) &old_sentinel, _m128{ sentinel.load ( std::memory_order_relaxed ) },
                                   ( _m128 * ) &new_counter ) );
             old_sentinel.external_count = new_counter.external_count;
-            // we're poppin'
+            // we're poppin' go get the box
             if ( node_ptr node = old_sentinel.node; node ) {
                 if ( not dwcas ( ( _m128 volatile * ) &old_sentinel, _m128{ sentinel.load ( std::memory_order_relaxed ) },
                                  ( _m128 * ) &node->next ) ) {
