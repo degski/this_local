@@ -638,17 +638,6 @@ class unbounded_circular_list final {
     }
 
     private:
-    HEDLEY_ALWAYS_INLINE void increase_external_count ( counted_link * old_counter_ ) noexcept {
-        counted_link new_counter;
-        do {
-            new_counter = *old_counter_;
-            new_counter.external_count += 1;
-        } while ( not dwcas ( old_counter_, sentinel.load ( std::memory_order_relaxed ),
-                              new_counter ) ); // not head.compare_exchange_strong ( old_counter_, new_counter,
-                                               // std::memory_order_acquire, std::memory_order_relaxed )
-        old_counter_->external_count = new_counter.external_count;
-    }
-
     HEDLEY_ALWAYS_INLINE void store_sentinel ( node_ptr p_, counted_link l_, unsigned char aba_id_ = 0 ) noexcept {
         std::memcpy ( reinterpret_cast<char *> ( &p_ ) + hi_index<node_ptr> ( ), &aba_id_, 1 );
         sentinel.store ( { std::forward<counted_link> ( l_ ), std::forward<node_ptr> ( p_ ) }, std::memory_order_relaxed );
@@ -882,22 +871,32 @@ class unbounded_circular_list final {
     }
     [[nodiscard]] iterator rend ( long long end_passes_ = 0 ) noexcept { return end ( std::forward<long long> ( end_passes_ ) ); }
 
-    /*
     void pop ( ) noexcept {
-        counted_link old_head = head.load ( std::memory_order_relaxed );
+        counted_sentinel volatile old_sentinel = sentinel.load ( std::memory_order_relaxed );
         for ( ever ) {
-            increase_external_count ( &old_head );
-            if ( node_ptr const link = old_head.link; link ) {
-                if ( head.compare_exchange_strong ( old_head, link->next, std::memory_order_relaxed ) ) {
-                    int const count_increase = old_head.external_count - 2;
-                    if ( link->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
-                        nodes.erase ( get_iterator_from_pointer ( link ) );
+            // increase external count
+            counted_link new_counter;
+            do {
+                new_counter = *( ( counted_link * ) &old_sentinel );
+                new_counter.external_count += 1;
+            } while ( not dwcas ( ( _m128 volatile * ) &old_sentinel, _m128{ sentinel.load ( std::memory_order_relaxed ) },
+                                  ( _m128 * ) &new_counter ) );
+            old_sentinel.external_count = new_counter.external_count;
+            // we're poppin'
+            if ( node_ptr node = old_sentinel.node; node ) {
+                if ( not dwcas ( ( _m128 volatile * ) &old_sentinel, _m128{ sentinel.load ( std::memory_order_relaxed ) },
+                                 ( _m128 * ) &node->next ) ) {
+                    unsigned long count_increase = old_sentinel.external_count - 2;
+                    if ( node->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
+                        nodes.erase ( nodes.get_iterator_from_pointer ( node ) );
+                    node->prev->next = node->next;
+                    node->next->prev = node->prev;
                     return;
                 }
                 else {
-                    if ( link->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 ) {
-                        link->internal_count.load ( std::memory_order_acquire );
-                        nodes.erase ( get_iterator_from_pointer ( link ) );
+                    if ( node->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 ) {
+                        auto _ = node->internal_count.load ( std::memory_order_acquire );
+                        nodes.erase ( nodes.get_iterator_from_pointer ( node ) );
                     }
                 }
             }
@@ -906,7 +905,6 @@ class unbounded_circular_list final {
             }
         }
     }
-    */
 
     template<typename Stream>
     Stream & ostream ( Stream & out_ ) noexcept {
@@ -1024,12 +1022,12 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     }
 
     void pop ( ) noexcept {
-        counted_link old_head = head.load ( std::memory_order_relaxed );
+        counted_link old_sentinel = head.load ( std::memory_order_relaxed );
         for ( ever ) {
-            increase_head_count ( old_head );
-            if ( node_ptr const next = old_head.next; next ) {
-                if ( head.compare_exchange_strong ( old_head, next->link, std::memory_order_relaxed ) ) {
-                    int const count_increase = old_head.external_count - 2;
+            increase_head_count ( old_sentinel );
+            if ( node_ptr const next = old_sentinel.next; next ) {
+                if ( head.compare_exchange_strong ( old_sentinel, next->link, std::memory_order_relaxed ) ) {
+                    int const count_increase = old_sentinel.external_count - 2;
                     if ( next->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
                         nodes.erase ( get_iterator_from_pointer ( next ) );
                     return;

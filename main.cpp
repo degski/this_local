@@ -194,6 +194,8 @@ int main_function_main ( ) {
         std::cout << id << sp;
     std::cout << nl;
 
+    ids.pop ( );
+
     return EXIT_SUCCESS;
 }
 
