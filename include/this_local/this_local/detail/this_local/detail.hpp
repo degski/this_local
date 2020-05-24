@@ -338,10 +338,10 @@ using pun_type = std::conditional_t<
                                                              std::conditional_t<sizeof ( ValueType ) == 2, __int16, __int8>>>>>;
 
 template<typename ValueType>
-[[nodiscard]] inline pun_type<ValueType> type_pun ( void const * const t_ ) noexcept {
-    pun_type<ValueType> t;
-    std::memcpy ( &t, t_, sizeof ( pun_type<ValueType> ) );
-    return t;
+[[nodiscard]] inline pun_type<ValueType> type_pun ( void const * const value_ ) noexcept {
+    pun_type<ValueType> value;
+    std::memcpy ( &value, value_, sizeof ( pun_type<ValueType> ) );
+    return value;
 }
 
 namespace lockless {
