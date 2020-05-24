@@ -889,6 +889,7 @@ class unbounded_circular_list final {
                     unsigned long count_increase = old_sentinel.external_count - 2;
                     if ( node->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
                         nodes.erase ( nodes.get_iterator_from_pointer ( node ) );
+                    // update back-link
                     node->prev->next = node->next;
                     node->next->prev = node->prev;
                     return;
