@@ -85,7 +85,8 @@
 
 namespace sax {
 
-inline bool constexpr SAX_USE_IO = true;
+inline bool constexpr SAX_ENABLE_OSTREAMS = true;
+inline bool constexpr SAX_SYNCED_OSTREAMS = true;
 
 [[nodiscard]] bool has_thread_exited ( std::thread::native_handle_type handle_ ) noexcept {
 #if defined( _MSC_VER )
@@ -102,16 +103,22 @@ inline bool constexpr SAX_USE_IO = true;
 
 namespace detail {
 template<typename ValueType>
-[[nodiscard]] inline constexpr std::enable_if_t<SAX_USE_IO, std::uint16_t>
+[[nodiscard]] inline constexpr std::enable_if_t<SAX_ENABLE_OSTREAMS, std::uint16_t>
 abbreviate_pointer_implementation ( std::uintptr_t pointer_ ) noexcept {
-    pointer_ >>= ilog2 ( alignof ( ValueType ) ); // strip lower bits
-    pointer_ ^= pointer_ >> 32;                   // fold high into low
-    pointer_ ^= pointer_ >> 16;                   // fold high into low
+    //
+    // Byte 8 is empty, byte 7 used to be empty but is now 'reserved' by Microsoft The 'old' 48-bit pointer corresponds to the
+    // addressable space of Intel hardware. The below implemented mapping from 2^64 space to 2^16 space, results in 64 duplicates
+    // (collisions if you want) per pointer. I think in practice (because the space is not cut up randomly, but split into
+    // user/kernel space) the chance of collissions is remotely small.
+    //
+    pointer_ ^= pointer_ >> 16; // 2 dups (4 for a 16-bit shift, but hi.hi.hi and hi.hi.lo are empty, so 2)
+    pointer_ ^= pointer_ >> 32; // 2 * 8 dups
+    pointer_ ^= pointer_ >> 16; // 2 * 8 * 4 dups
     return ( std::uint16_t ) pointer_;
 }
 } // namespace detail
 template<typename ValueType>
-[[nodiscard]] inline constexpr std::enable_if_t<SAX_USE_IO, std::uint16_t>
+[[nodiscard]] inline constexpr std::enable_if_t<SAX_ENABLE_OSTREAMS, std::uint16_t>
 abbreviate_pointer ( ValueType const * pointer_ ) noexcept {
     return detail::abbreviate_pointer_implementation<ValueType> ( std::forward<std::uintptr_t> ( ( std::uintptr_t ) pointer_ ) );
 }
@@ -120,10 +127,8 @@ namespace lockless {
 
 // With a big Thanks to Google Benchmark (the people).
 //
-// The do_not_optimize (...) function can be used to prevent a value or
-// expression from being optimized away by the compiler. This function is
-// intended to add little to no overhead.
-// See: https://youtu.be/nXaxk27zwlk?t=2441
+// The do_not_optimize (...) function can be used to prevent a value or expression from being optimized away by the compiler. This
+// function is intended to add little to no overhead. See: https://youtu.be/nXaxk27zwlk?t=2441
 namespace detail {
 inline void use_char_pointer ( char const volatile * ) noexcept {}
 } // namespace detail
@@ -141,8 +146,7 @@ HEDLEY_ALWAYS_INLINE void do_not_optimize ( Anything * value_ ) noexcept {
 
 // With a big Thanks to Google Benchmark (the people).
 //
-// Force the compiler to flush pending writes to global memory. Acts as an
-// effective read/write barrier
+// Force the compiler to flush pending writes to global memory. Acts as an effective read/write barrier
 HEDLEY_ALWAYS_INLINE void clobber_memory ( ) noexcept {
 #if defined( _MSC_VER )
     _ReadWriteBarrier ( );
@@ -382,17 +386,6 @@ template<typename MutexType>
 #endif
 }
 
-} // namespace lockless
-
-[[nodiscard]] static constexpr int ilog2 ( std::uint64_t v_ ) noexcept {
-    int c = !!v_;
-    while ( v_ >>= 1 )
-        c += 1;
-    return c;
-}
-
-namespace lockless {
-
 HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
 #if ( defined( __clang__ ) or defined( __GNUC__ ) )
     asm( "pause" );
@@ -485,7 +478,7 @@ struct slim_rw_lock final {
     ;                                                                                                                              \
     ;
 
-alignas ( 64 ) inline static lockless::spin_rw_lock<long long> global_mutex;
+alignas ( 64 ) inline static lockless::spin_rw_lock<long long> ostream;
 
 struct front_insertion {};
 struct back_insertion {};
@@ -512,10 +505,12 @@ class unbounded_circular_list final {
         link *prev, *next;
 
         template<typename Stream>
-        [[maybe_unused]] friend std::enable_if_t<SAX_USE_IO, Stream &> operator<< ( Stream & out_, link const & link_ ) noexcept {
-            auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            std::scoped_lock lock ( global_mutex );
-            out_ << '<l ' << ap ( link_.prev ) << ' ' << ap ( link_.next ) << '>';
+        [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> operator<< ( Stream & out_,
+                                                                                             link const & link_ ) noexcept {
+            auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
+            if constexpr ( SAX_SYNCED_OSTREAMS )
+                std::scoped_lock lock ( ostream );
+            out_ << '<l ' << a ( link_.prev ) << ' ' << a ( link_.next ) << '>';
             return out_;
         }
     };
@@ -524,11 +519,12 @@ class unbounded_circular_list final {
         unsigned long external_count;
 
         template<typename Stream>
-        [[maybe_unused]] friend std::enable_if_t<SAX_USE_IO, Stream &> operator<< ( Stream & out_,
-                                                                                    counted_link const & link_ ) noexcept {
-            auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            std::scoped_lock lock ( global_mutex );
-            out_ << '<c ' << ap ( link_.prev ) << ' ' << ap ( link_.next ) << '.' << link_.external_count << '>';
+        [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> operator<< ( Stream & out_,
+                                                                                             counted_link const & link_ ) noexcept {
+            auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
+            if constexpr ( SAX_SYNCED_OSTREAMS )
+                std::scoped_lock lock ( ostream );
+            out_ << '<c ' << a ( link_.prev ) << ' ' << a ( link_.next ) << '.' << link_.external_count << '>';
             return out_;
         }
     };
@@ -543,15 +539,18 @@ class unbounded_circular_list final {
         node ( Args &&... args_ ) : counted_link{ }, data{ std::forward<Args> ( args_ )... } {}
 
         template<typename Stream>
-        [[maybe_unused]] friend std::enable_if_t<SAX_USE_IO, Stream &> operator<< ( Stream & out_, node const * link_ ) noexcept {
-            auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            std::scoped_lock lock ( global_mutex );
-            out_ << '<n ' << ap ( &*link_ ) << ' ' << ap ( link_->prev ) << ' ' << ap ( link_->next ) << '.'
-                 << link_->internal_count << '-' << link_->external_count << '>';
+        [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> operator<< ( Stream & out_,
+                                                                                             node const * link_ ) noexcept {
+            auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
+            if constexpr ( SAX_SYNCED_OSTREAMS )
+                std::scoped_lock lock ( ostream );
+            out_ << '<n ' << a ( &*link_ ) << ' ' << a ( link_->prev ) << ' ' << a ( link_->next ) << '.' << link_->internal_count
+                 << '-' << link_->external_count << '>';
             return out_;
         }
         template<typename Stream>
-        [[maybe_unused]] friend std::enable_if_t<SAX_USE_IO, Stream &> operator<< ( Stream & out_, node const & link_ ) noexcept {
+        [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> operator<< ( Stream & out_,
+                                                                                             node const & link_ ) noexcept {
             return operator<< ( out_, &link_ );
         }
 
@@ -565,11 +564,12 @@ class unbounded_circular_list final {
         node_ptr node = nullptr; // a sentinel value, the last node added
 
         template<typename Stream>
-        [[maybe_unused]] friend std::enable_if_t<SAX_USE_IO, Stream &> operator<< ( Stream & out_,
-                                                                                    counted_sentinel const & link_ ) noexcept {
-            auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            std::scoped_lock lock ( global_mutex );
-            out_ << '<s ' << ap ( &link_ ) << ' ' << ap ( link_->prev ) << ' ' << ap ( link_->next ) << '.' << link_->external_count
+        [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &>
+        operator<< ( Stream & out_, counted_sentinel const & link_ ) noexcept {
+            auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
+            if constexpr ( SAX_SYNCED_OSTREAMS )
+                std::scoped_lock lock ( ostream );
+            out_ << '<s ' << a ( &link_ ) << ' ' << a ( link_->prev ) << ' ' << a ( link_->next ) << '.' << link_->external_count
                  << '>';
             return out_;
         }
@@ -953,9 +953,9 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
 
         template<typename Stream>
         [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_ptr link_ ) noexcept {
-            auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
+            auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
             std::scoped_lock lock ( lock_free_plf_stack::global );
-            out_ << '<' << ap ( link_ ) << ' ' << ap ( link_->link.next ) << '>';
+            out_ << '<' << a ( link_ ) << ' ' << a ( link_->link.next ) << '>';
             return out_;
         }
         template<typename Stream>
