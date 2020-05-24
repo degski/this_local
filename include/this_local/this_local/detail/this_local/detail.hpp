@@ -908,7 +908,7 @@ class unbounded_circular_list final {
     }
 
     template<typename Stream>
-    Stream & ostream ( Stream & out_ ) noexcept {
+    std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> ostream ( Stream & out_ ) noexcept {
         for ( auto & n : nodes )
             out_ << n;
         out_ << std::endl;
@@ -916,12 +916,11 @@ class unbounded_circular_list final {
     }
 
     template<typename Stream>
-    [[maybe_unused]] friend Stream & operator<< ( Stream & out_, unbounded_circular_list const & list_ ) noexcept {
+    [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &>
+    operator<< ( Stream & out_, unbounded_circular_list const & list_ ) noexcept {
         return list_.ostream ( out_ );
     }
-
-    static constexpr int offset_data = static_cast<int> ( offsetof ( node, data ) );
-}; // namespace lockless
+};
 
 } // namespace lockless
 
