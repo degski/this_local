@@ -629,18 +629,18 @@ class unbounded_circular_list final {
 
     public:
     unbounded_circular_list ( ) :
-        insert_front_implementation{ &unbounded_circular_list::insert_init_implementation<front_insertion> },
-        insert_back_implementation{ &unbounded_circular_list::insert_init_implementation<back_insertion> } {}
+        insert_front_implementation{ &unbounded_circular_list::insert_initial_implementation<front_insertion> },
+        insert_back_implementation{ &unbounded_circular_list::insert_initial_implementation<back_insertion> } {}
 
     unbounded_circular_list ( value_type const & data_ ) {
-        insert_init_implementation<DefaultInsertionMode> ( nodes.emplace ( data_ ) );
+        insert_initial_implementation<DefaultInsertionMode> ( nodes.emplace ( data_ ) );
     }
     unbounded_circular_list ( value_type && data_ ) {
-        insert_init_implementation<DefaultInsertionMode> ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+        insert_initial_implementation<DefaultInsertionMode> ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
     unbounded_circular_list ( Args &&... args_ ) {
-        insert_init_implementation<DefaultInsertionMode> ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+        insert_initial_implementation<DefaultInsertionMode> ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
     private:
@@ -675,7 +675,7 @@ class unbounded_circular_list final {
     }
 
     template<typename At>
-    [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_init_implementation ( nodes_iterator && it_ ) noexcept {
+    [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_initial_implementation ( nodes_iterator && it_ ) noexcept {
         std::scoped_lock lock ( instance );
         node_ptr new_node                = &*it_;
         *( ( counted_link * ) new_node ) = counted_link{ link{ &end_link, &end_link }, 1 };
