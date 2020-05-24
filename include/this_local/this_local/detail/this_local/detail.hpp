@@ -547,7 +547,7 @@ class unbounded_circular_list final {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
             std::scoped_lock lock ( global_mutex );
             out_ << '<n ' << ap ( &*link_ ) << ' ' << ap ( link_->prev ) << ' ' << ap ( link_->next ) << '.'
-                 << link_->external_count << '>';
+                 << link_->internal_count << '-' << link_->external_count << '>';
             return out_;
         }
         template<typename Stream>
