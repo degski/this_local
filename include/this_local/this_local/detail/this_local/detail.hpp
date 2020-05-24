@@ -729,6 +729,44 @@ class unbounded_circular_list final {
         return ( this->*insert_front_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
+    void pop ( ) noexcept {
+        counted_sentinel volatile old_sentinel = sentinel.load ( std::memory_order_relaxed );
+        for ( ever ) {
+            // increase external count
+            counted_link new_counter;
+            do {
+                new_counter = *( ( counted_link * ) &old_sentinel );
+                new_counter.external_count += 1;
+            } while ( not dwcas ( ( _m128 volatile * ) &old_sentinel, _m128{ sentinel.load ( std::memory_order_relaxed ) },
+                                  ( _m128 * ) &new_counter ) );
+            old_sentinel.external_count = new_counter.external_count;
+            // we're poppin'
+            if ( node_ptr node = old_sentinel.node; node ) {
+                if ( not dwcas ( ( _m128 volatile * ) &old_sentinel, _m128{ sentinel.load ( std::memory_order_relaxed ) },
+                                 ( _m128 * ) &node->next ) ) {
+                    unsigned long count_increase = old_sentinel.external_count - 2;
+                    if ( node->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase ) {
+                        node->next->prev = node->prev; // update back-link
+                        node->prev->next = node->next; // update back-link
+                        nodes.erase ( nodes.get_iterator_from_pointer ( node ) );
+                    }
+                    return;
+                }
+                else {
+                    if ( node->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 ) {
+                        auto _           = node->internal_count.load ( std::memory_order_acquire );
+                        node->next->prev = node->prev; // update back-link
+                        node->prev->next = node->next; // update back-link
+                        nodes.erase ( nodes.get_iterator_from_pointer ( node ) );
+                    }
+                }
+            }
+            else {
+                return;
+            }
+        }
+    }
+
     class alignas ( 16 ) iterator final {
         friend class unbounded_circular_list;
 
@@ -870,44 +908,6 @@ class unbounded_circular_list final {
         return rend ( std::forward<long long> ( end_passes_ ) );
     }
     [[nodiscard]] iterator rend ( long long end_passes_ = 0 ) noexcept { return end ( std::forward<long long> ( end_passes_ ) ); }
-
-    void pop ( ) noexcept {
-        counted_sentinel volatile old_sentinel = sentinel.load ( std::memory_order_relaxed );
-        for ( ever ) {
-            // increase external count
-            counted_link new_counter;
-            do {
-                new_counter = *( ( counted_link * ) &old_sentinel );
-                new_counter.external_count += 1;
-            } while ( not dwcas ( ( _m128 volatile * ) &old_sentinel, _m128{ sentinel.load ( std::memory_order_relaxed ) },
-                                  ( _m128 * ) &new_counter ) );
-            old_sentinel.external_count = new_counter.external_count;
-            // we're poppin'
-            if ( node_ptr node = old_sentinel.node; node ) {
-                if ( not dwcas ( ( _m128 volatile * ) &old_sentinel, _m128{ sentinel.load ( std::memory_order_relaxed ) },
-                                 ( _m128 * ) &node->next ) ) {
-                    unsigned long count_increase = old_sentinel.external_count - 2;
-                    if ( node->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase ) {
-                        node->next->prev = node->prev; // update back-link
-                        node->prev->next = node->next; // update back-link
-                        nodes.erase ( nodes.get_iterator_from_pointer ( node ) );
-                    }
-                    return;
-                }
-                else {
-                    if ( node->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 ) {
-                        auto _           = node->internal_count.load ( std::memory_order_acquire );
-                        node->next->prev = node->prev; // update back-link
-                        node->prev->next = node->next; // update back-link
-                        nodes.erase ( nodes.get_iterator_from_pointer ( node ) );
-                    }
-                }
-            }
-            else {
-                return;
-            }
-        }
-    }
 
     template<typename Stream>
     std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> ostream ( Stream & out_ ) noexcept {
