@@ -734,6 +734,7 @@ class unbounded_circular_list final {
     void delete_implementation ( node_ptr node_ ) noexcept {
         if constexpr ( MemoryOrderAcquire )
             auto const _ = node_->internal_count.load ( std::memory_order_acquire );
+        node_->prev = node_->next = nullptr; // !
         nodes.erase ( nodes.get_iterator_from_pointer ( node_ ) );
     }
 
