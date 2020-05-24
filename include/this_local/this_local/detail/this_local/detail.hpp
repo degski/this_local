@@ -788,16 +788,6 @@ class unbounded_circular_list final {
                 std::forward<long long> ( end_passes_ )
             } {}
 
-        void repair_links_prev ( node_ptr node_ ) noexcept {
-            if ( HEDLEY_LIKELY ( node_ ) ) {
-                counted_link * node = node_->next_;
-                while ( HEDLEY_LIKELY ( node != node_ ) ) {
-                    node->prev = ( counted_link * ) node;
-                    node       = node->next;
-                }
-            }
-        }
-
         public:
         using iterator_category = std::bidirectional_iterator_tag;
 
@@ -841,16 +831,6 @@ class unbounded_circular_list final {
             node{ std::forward<const_node_ptr> ( node_ ) }, end_node{ std::forward<const_node_ptr> ( end_node_ ) }, skip_end{
                 std::forward<long long> ( end_passes_ )
             } {}
-
-        void repair_links_prev ( node_ptr node_ ) noexcept {
-            if ( HEDLEY_LIKELY ( node_ ) ) {
-                counted_link * node = node_->next_;
-                while ( HEDLEY_LIKELY ( node != ( ( node_ptr ) node_ ) ) ) {
-                    node->prev = ( counted_link * ) node;
-                    node       = node->next;
-                }
-            }
-        }
 
         public:
         using iterator_category = std::bidirectional_iterator_tag;
