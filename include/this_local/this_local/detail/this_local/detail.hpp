@@ -515,7 +515,7 @@ class unbounded_circular_list final {
         [[maybe_unused]] friend std::enable_if_t<SAX_USE_IO, Stream &> operator<< ( Stream & out_, link const & link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
             std::scoped_lock lock ( global_mutex );
-            out_ << '<' << ap ( link_.prev ) << ' ' << ap ( link_.next ) << '>';
+            out_ << '<l ' << ap ( link_.prev ) << ' ' << ap ( link_.next ) << '>';
             return out_;
         }
     };
@@ -528,7 +528,7 @@ class unbounded_circular_list final {
                                                                                     counted_link const & link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
             std::scoped_lock lock ( global_mutex );
-            out_ << '<' << ap ( link_.prev ) << ' ' << ap ( link_.next ) << '.' << link_.external_count << '>';
+            out_ << '<c ' << ap ( link_.prev ) << ' ' << ap ( link_.next ) << '.' << link_.external_count << '>';
             return out_;
         }
     };
@@ -546,8 +546,8 @@ class unbounded_circular_list final {
         [[maybe_unused]] friend std::enable_if_t<SAX_USE_IO, Stream &> operator<< ( Stream & out_, node const * link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
             std::scoped_lock lock ( global_mutex );
-            out_ << '<' << ap ( &*link_ ) << ' ' << ap ( link_->prev ) << ' ' << ap ( link_->next ) << '.' << link_->external_count
-                 << '>';
+            out_ << '<n ' << ap ( &*link_ ) << ' ' << ap ( link_->prev ) << ' ' << ap ( link_->next ) << '.'
+                 << link_->external_count << '>';
             return out_;
         }
         template<typename Stream>
@@ -569,7 +569,7 @@ class unbounded_circular_list final {
                                                                                     counted_sentinel const & link_ ) noexcept {
             auto ap = [] ( auto p ) { return abbreviate_pointer ( p ); };
             std::scoped_lock lock ( global_mutex );
-            out_ << '<' << ap ( &link_ ) << ' ' << ap ( link_->prev ) << ' ' << ap ( link_->next ) << '.' << link_->external_count
+            out_ << '<s ' << ap ( &link_ ) << ' ' << ap ( link_->prev ) << ' ' << ap ( link_->next ) << '.' << link_->external_count
                  << '>';
             return out_;
         }
