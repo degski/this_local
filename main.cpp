@@ -198,202 +198,7 @@ int main5686780 ( ) {
 
 */
 
-int main56867567 ( ) {
-
-    /*
-    auto a = _mm_set_ps ( 0.0, 0.0, 0.0, 0.0 );
-    auto b = _mm_set_ps ( 0.0, 0.0, 0.0, 0.0 );
-
-    std::cout << sax::equal_m128 ( &a, &b ) << ' ';
-
-    auto c = _mm_set_ps ( 0.0, 0.0, 0.0, 1.0 );
-
-    std::cout << sax::equal_m128 ( &a, &c ) << nl;
-    */
-
-    {
-        std::uint64_t a[ 3 ] = { 1, 1, 1 };
-        std::uint64_t b[ 3 ] = { 1, 1, 1 };
-
-        std::cout << sax::equal_m192 ( &a, &b ) << nl;
-    }
-
-    {
-        std::uint64_t a[ 3 ] = { 0, 1, 1 };
-        std::uint64_t b[ 3 ] = { 1, 1, 1 };
-
-        std::cout << sax::equal_m192 ( &a, &b ) << nl;
-    }
-    {
-        std::uint64_t a[ 3 ] = { 1, 0, 1 };
-        std::uint64_t b[ 3 ] = { 1, 1, 1 };
-
-        std::cout << sax::equal_m192 ( &a, &b ) << nl;
-    }
-    {
-        std::uint64_t a[ 3 ] = { 1, 1, 0 };
-        std::uint64_t b[ 3 ] = { 1, 1, 1 };
-
-        std::cout << sax::equal_m192 ( &a, &b ) << nl;
-    }
-
-    {
-        std::uint64_t a[ 3 ] = { 0, 0, 1 };
-        std::uint64_t b[ 3 ] = { 1, 1, 1 };
-
-        std::cout << sax::equal_m192 ( &a, &b ) << nl;
-    }
-
-    {
-        std::uint64_t a[ 3 ] = { 1, 0, 0 };
-        std::uint64_t b[ 3 ] = { 1, 1, 1 };
-
-        std::cout << sax::equal_m192 ( &a, &b ) << nl;
-    }
-
-    //  std::cout << sax::equal_m192 ( a.data ( ), b.data ( ) ) << nl;
-
-    // for ( std::size_t i = 0; i < 256; ++i ) {
-
-    //     std::cout << sax::equal_m128 ( a.data ( ), b.data ( ) ) << nl;
-    // }
-
-    /*
-
-    sax::uint128_t de = { 1, 2 };
-    sax::uint128_t ex = { 3, 4 };
-    sax::uint128_t cr = { 0, 2 };
-
-    std::cout << de << cr << nl;
-    std::cout << sax::lockless::soft_dwcas<sax::lockless::spin_rw_lock<long long>> ( &de, ex, &cr ) << nl;
-    std::cout << de << cr << nl;
-
-    sax::lockless::unbounded_circular_list<int> list;
-
-    std::ios::sync_with_stdio ( false );
-
-    constexpr int N = 4;
-
-    sax::lockless::unbounded_circular_list<int> list;
-
-    list.emplace ( 0 );
-    list.ostream ( std::cout );
-
-    list.emplace ( 1 );
-    list.ostream ( std::cout );
-
-    list.emplace ( 2 );
-    list.ostream ( std::cout );
-
-    // list.emplace ( 3 );
-    // list.ostream ( std::cout );
-    */
-    /*
-
-    std::uint64_t duration;
-    plf::nanotimer timer;
-    timer.start ( );
-
-    for ( int n = 0; n < N; ++n )
-        std::jthread{ work<sax::lockless::unbounded_circular_list<int>>, std::ref ( stk ) };
-
-    duration = static_cast<std::uint64_t> ( timer.get_elapsed_ms ( ) );
-
-    int sum = std::accumulate ( stk.begin ( ), stk.end ( ), 0, [] ( auto & l, auto & r ) { return l + r.data; } );
-
-    std::cout << std::boolalpha << ( ( ( N * ( N + 1 ) ) / 2 ) == sum ) << sp << std::dec << ( ( ( duration * 10 ) / N ) / 10.0 )
-              << " ms/thread" << nl;
-
-    for ( auto & n : stk )
-        std::cout << n;
-    std::cout << nl;
-
-    */
-
-    return EXIT_SUCCESS;
-}
-
-template<typename T>
-struct alignas ( 16 ) aligned_pair {
-    T a, b;
-    aligned_pair ( T && a_, T && b_ ) : a{ std::forward<T> ( a_ ) }, b{ std::forward<T> ( b_ ) } {}
-};
-
-std::vector<aligned_pair<std::uint64_t>> random_vector ( std::size_t length_ ) {
-    std::vector<aligned_pair<std::uint64_t>> v;
-    for ( std::size_t i = 0; i < length_; ++i )
-        v.emplace_back ( rng ( ), rng ( ) );
-    return v;
-}
-
 int main_function_0 ( ) {
-
-    constexpr std::size_t N = 2'000;
-
-    auto pr1 = random_vector ( 12 * N );
-    auto pr2 = random_vector ( 12 * N );
-
-    std::uint64_t * pr1p = { reinterpret_cast<std::uint64_t *> ( pr1.data ( ) ) };
-    std::uint64_t * pr2p = { reinterpret_cast<std::uint64_t *> ( pr1.data ( ) ) };
-
-    {
-        std::vector<std::uint64_t> a{ pr1p, pr1p + 12 * N }, b = { pr2p, pr2p + 12 * N };
-        bool result = true;
-
-        std::uint64_t duration;
-        plf::nanotimer timer;
-        timer.start ( );
-
-        for ( std::size_t i = 0; i < 12 * N; i += 1 ) {
-            sax::lockless::do_not_optimize ( a.data ( ) + i );
-            sax::lockless::do_not_optimize ( b.data ( ) + i );
-            result = result and a[ i ] == b[ i ];
-        }
-
-        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
-        std::cout << std::dec << duration << " ms " << result << nl;
-    }
-
-    {
-        std::vector<std::uint64_t> a{ pr1p, pr1p + 12 * N }, b = { pr2p, pr2p + 12 * N };
-        bool result = true;
-
-        std::uint64_t duration;
-        plf::nanotimer timer;
-        timer.start ( );
-
-        for ( std::size_t i = 0; i < 12 * N; i += 2 ) {
-            sax::lockless::do_not_optimize ( a.data ( ) + i );
-            sax::lockless::do_not_optimize ( b.data ( ) + i );
-            result = result and sax::equal_m128 ( a.data ( ) + i, b.data ( ) + i );
-        }
-
-        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
-        std::cout << std::dec << duration << " ms " << result << nl;
-    }
-
-    {
-        std::vector<std::uint64_t> a{ pr1p, pr1p + 12 * N }, b = { pr2p, pr2p + 12 * N };
-        bool result = true;
-
-        std::uint64_t duration;
-        plf::nanotimer timer;
-        timer.start ( );
-
-        for ( std::size_t i = 0; i < 12 * N; i += 4 ) {
-            sax::lockless::do_not_optimize ( a.data ( ) + i );
-            sax::lockless::do_not_optimize ( b.data ( ) + i );
-            result = result and sax::equal_m256 ( a.data ( ) + i, b.data ( ) + i );
-        }
-
-        duration = static_cast<std::uint64_t> ( timer.get_elapsed_us ( ) );
-        std::cout << std::dec << duration << " ms " << result << nl;
-    }
-
-    return EXIT_SUCCESS;
-}
-
-int main_function_1 ( ) {
 
     alignas ( 32 ) std::array<std::uint64_t, 24> pr1 = { 24, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1,
                                                          24, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1 };
@@ -429,8 +234,12 @@ int main_function_1 ( ) {
         plf::nanotimer timer;
         timer.start ( );
 
-        for ( std::size_t i = 0; i < 24; i += 2 )
-            result = result and sax::equal_m128 ( a.data ( ) + i, b.data ( ) + i );
+        for ( std::size_t i = 0; i < 24; i += 2 ) {
+            bool r = sax::equal_m128 ( a.data ( ) + i, b.data ( ) + i );
+            if ( not r )
+                std::cout << i << ' ';
+            result = result and r;
+        }
 
         duration = static_cast<std::uint64_t> ( timer.get_elapsed_ns ( ) );
         std::cout << std::dec << duration << " ms " << result << nl;
@@ -449,9 +258,9 @@ int main_function_1 ( ) {
 
         duration = static_cast<std::uint64_t> ( timer.get_elapsed_ns ( ) );
         std::cout << std::dec << duration << " ms " << result << nl;
-
-        return EXIT_SUCCESS;
     }
+
+    return EXIT_SUCCESS;
 }
 
 /*
@@ -461,4 +270,10 @@ int main_function_1 ( ) {
     C:\Program Files\LLVM\lib\clang\10.0.0\lib\windows\clang_rt.asan-x86_64.lib
 */
 
-int main ( ) { return main_function_1 ( ); }
+int main ( ) {
+
+    main_function_0 ( );
+    std::cout << nl;
+
+    return EXIT_SUCCESS;
+}

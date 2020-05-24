@@ -116,6 +116,43 @@ abbreviate_pointer ( ValueType const * pointer_ ) noexcept {
     return detail::abbreviate_pointer_implementation<ValueType> ( std::forward<std::uintptr_t> ( ( std::uintptr_t ) pointer_ ) );
 }
 
+namespace lockless {
+
+// With a big Thanks to Google Benchmark (the people).
+//
+// The do_not_optimize (...) function can be used to prevent a value or
+// expression from being optimized away by the compiler. This function is
+// intended to add little to no overhead.
+// See: https://youtu.be/nXaxk27zwlk?t=2441
+namespace detail {
+inline void use_char_pointer ( char const volatile * ) noexcept {}
+} // namespace detail
+template<typename Anything>
+HEDLEY_ALWAYS_INLINE void do_not_optimize ( Anything * value_ ) noexcept {
+#if defined( _MSC_VER )
+    detail::use_char_pointer ( &reinterpret_cast<char const volatile &> ( value_ ) );
+    _ReadWriteBarrier ( );
+#elif defined( __clang__ )
+    asm volatile( "" : "+r,m"( value_ ) : : "memory" );
+#else
+    asm volatile( "" : "+m,r"( value_ ) : : "memory" );
+#endif
+}
+
+// With a big Thanks to Google Benchmark (the people).
+//
+// Force the compiler to flush pending writes to global memory. Acts as an
+// effective read/write barrier
+HEDLEY_ALWAYS_INLINE void clobber_memory ( ) noexcept {
+#if defined( _MSC_VER )
+    _ReadWriteBarrier ( );
+#else
+    asm volatile( "" : : : "memory" );
+#endif
+}
+
+} // namespace lockless
+
 template<typename ValueType>
 inline constexpr int hi_index ( ) noexcept {
     short v = 1;
@@ -128,8 +165,8 @@ inline constexpr int lo_index ( ) noexcept {
     return not *reinterpret_cast<char *> ( &v ) ? sizeof ( ValueType ) - 1 : 0;
 }
 
-[[nodiscard]] inline constexpr bool is_little_endian ( ) noexcept { return hi_index<short> ( ); }
-[[nodiscard]] inline constexpr bool is_big_endian ( ) noexcept { return lo_index<short> ( ); }
+[[nodiscard]] inline constexpr bool is_little_endian ( ) noexcept { return 1 == hi_index<short> ( ); }
+[[nodiscard]] inline constexpr bool is_big_endian ( ) noexcept { return 1 == lo_index<short> ( ); }
 
 inline bool const LITTLE_ENDIAN = is_little_endian ( );
 inline bool const BIG_ENDIAN    = is_big_endian ( );
@@ -144,33 +181,20 @@ inline bool const BIG_ENDIAN    = is_big_endian ( );
     return a == b;
 }
 
-// Instruction-reordering can occur when f.e. emplacing repeatedly into a vector (also in one thread). Fences have only
-// relevance in a multithreading environment, and can solve this problem, but come with their cost, and is not a general
-// solution. Atomics and cas-operations can contribute to help solving this problem. In 'real'-use-cases, the comparants
-// will often involve either (atomic variable based) spinlocks and/or cas-operations, either of which will make this
-// problem never appear in the firat place. Just saying :)
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m128 ( void const * const a_, void const * const b_ ) noexcept {
-    return not _mm_movemask_pd ( _mm_cmpneq_pd ( _mm_load_pd ( ( double * ) a_ ), _mm_load_pd ( ( double * ) b_ ) ) );
+    return not _mm_movemask_pd ( _mm_cmpneq_pd ( _mm_load_pd ( ( double const * ) a_ ), _mm_load_pd ( ( double const * ) b_ ) ) );
 }
-// Instruction-reordering can occur when f.e. emplacing repeatedly into a vector (also in one thread). Fences have only
-// relevance in a multithreading environment, and can solve this problem, but come with their cost, and is not a general
-// solution. Atomics and cas-operations can contribute to help solving this problem. In 'real'-use-cases, the comparants
-// will often involve either (atomic variable based) spinlocks and/or cas-operations, either of which will make this
-// problem never appear in the firat place. Just saying :)
+
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m192 ( void const * const a_, void const * const b_ ) noexcept {
-    return equal_m128 ( a_, b_ ) ? equal_m64 ( ( __m64 * ) a_ + 2, ( __m64 * ) b_ + 2 ) : false;
+    return equal_m128 ( a_, b_ ) ? equal_m64 ( ( __m64 const * ) a_ + 2, ( __m64 const * ) b_ + 2 ) : false;
 }
-// Instruction-reordering can occur when f.e. emplacing repeatedly into a vector (also in one thread). Fences have only
-// relevance in a multithreading environment, and can solve this problem, but come with their cost, and is not a general
-// solution. Atomics and cas-operations can contribute to help solving this problem. In 'real'-use-cases, the comparants
-// will often involve either (atomic variable based) spinlocks and/or cas-operations, either of which will make this
-// problem never appear in the firat place. Just saying :)
+
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m256 ( void const * const a_, void const * const b_ ) noexcept {
     return not _mm256_movemask_pd (
         _mm256_cmp_pd ( _mm256_load_pd ( ( double const * ) a_ ), _mm256_load_pd ( ( double const * ) b_ ), _CMP_NEQ_UQ ) );
 }
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m384 ( void const * const a_, void const * const b_ ) noexcept {
-    return equal_m256 ( a_, b_ ) ? equal_m128 ( ( __m128 * ) a_ + 2, ( __m128 * ) b_ + 2 ) : false;
+    return equal_m256 ( a_, b_ ) ? equal_m128 ( ( __m128 const * ) a_ + 2, ( __m128 const * ) b_ + 2 ) : false;
 }
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m64 ( void const * const a_, void const * const b_ ) noexcept {
@@ -326,7 +350,7 @@ using pun_type = std::conditional_t<
                                                              std::conditional_t<sizeof ( ValueType ) == 2, __int16, __int8>>>>>;
 
 template<typename ValueType>
-[[nodiscard]] inline pun_type<ValueType> pun_for_fun ( void const * const t_ ) noexcept {
+[[nodiscard]] inline pun_type<ValueType> type_pun ( void const * const t_ ) noexcept {
     pun_type<ValueType> t;
     std::memcpy ( &t, t_, sizeof ( pun_type<ValueType> ) );
     return t;
@@ -360,13 +384,13 @@ template<typename MutexType>
     __asm__ __volatile__( "lock cmpxchg16b %1\n\t"
                           "setz %0"
                           : "=q"( value ), "+m"( dest_ ), "+d"( cr_old_->m128_m64[ hi_index<short> ( ) ] ),
-                            "+a"( cr_old_->m128_m64[ not hi_index<short> ( ) ] )
-                          : "c"( ex_new_.m128_m64[ hi_index<short> ( ) ] ), "b"( ex_new_.m128_m64[ not hi_index<short> ( ) ] )
+                            "+a"( cr_old_->m128_m64[ lo_index<short> ( ) ] )
+                          : "c"( ex_new_.m128_m64[ hi_index<short> ( ) ] ), "b"( ex_new_.m128_m64[ lo_index<short> ( ) ] )
                           : "cc" );
     return value;
 #else
     return _InterlockedCompareExchange128 ( ( long long volatile * ) dest_, ex_new_.m128_long64[ hi_index<short> ( ) ],
-                                            ex_new_.m128_long64[ not hi_index<short> ( ) ], ( long long * ) cr_old_ );
+                                            ex_new_.m128_long64[ lo_index<short> ( ) ], ( long long * ) cr_old_ );
 #endif
 }
 
@@ -388,39 +412,6 @@ HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
     _mm_pause ( );
 #else
 #    error support for the babbage engine has ended
-#endif
-}
-
-// With a big Thanks to Google Benchmark (the people).
-//
-// The do_not_optimize (...) function can be used to prevent a value or
-// expression from being optimized away by the compiler. This function is
-// intended to add little to no overhead.
-// See: https://youtu.be/nXaxk27zwlk?t=2441
-namespace detail {
-inline void use_char_pointer ( char const volatile * ) noexcept {}
-} // namespace detail
-template<typename Anything>
-HEDLEY_ALWAYS_INLINE void do_not_optimize ( Anything * value_ ) noexcept {
-#if defined( _MSC_VER )
-    detail::use_char_pointer ( &reinterpret_cast<char const volatile &> ( value_ ) );
-    _ReadWriteBarrier ( );
-#elif defined( __clang__ )
-    asm volatile( "" : "+r,m"( value_ ) : : "memory" );
-#else
-    asm volatile( "" : "+m,r"( value_ ) : : "memory" );
-#endif
-}
-
-// With a big Thanks to Google Benchmark (the people).
-//
-// Force the compiler to flush pending writes to global memory. Acts as an
-// effective read/write barrier
-HEDLEY_ALWAYS_INLINE void clobber_memory ( ) noexcept {
-#if defined( _MSC_VER )
-    _ReadWriteBarrier ( );
-#else
-    asm volatile( "" : : : "memory" );
 #endif
 }
 
