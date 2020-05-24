@@ -83,9 +83,9 @@
 #include "../../../this_local/plf_list.h"
 #include "../../../this_local/plf_stack.h"
 
-inline bool constexpr SAX_USE_IO = true;
-
 namespace sax {
+
+inline bool constexpr SAX_USE_IO = true;
 
 [[nodiscard]] bool has_thread_exited ( std::thread::native_handle_type handle_ ) noexcept {
 #if defined( _MSC_VER )
@@ -164,12 +164,6 @@ inline constexpr int lo_index ( ) noexcept {
     short v = 1;
     return not *reinterpret_cast<char *> ( &v ) ? sizeof ( ValueType ) - 1 : 0;
 }
-
-[[nodiscard]] inline constexpr bool is_little_endian ( ) noexcept { return 1 == hi_index<short> ( ); }
-[[nodiscard]] inline constexpr bool is_big_endian ( ) noexcept { return 1 == lo_index<short> ( ); }
-
-inline bool const LITTLE_ENDIAN = is_little_endian ( );
-inline bool const BIG_ENDIAN    = is_big_endian ( );
 
 // https://godbolt.org/z/efTuAz https://godbolt.org/z/XQYNzT
 
