@@ -382,7 +382,7 @@ template<typename MutexType>
     return true;
 }
 
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( _m128 volatile * dest_, _m128 ex_new_, _m128 * cr_old_ ) noexcept {
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas_implementation ( _m128 volatile * dest_, _m128 ex_new_, _m128 * cr_old_ ) noexcept {
 #if ( defined( __clang__ ) or defined( __GNUC__ ) )
     bool value;
     __asm__ __volatile__( "lock cmpxchg16b %1\n\t"
@@ -396,6 +396,12 @@ template<typename MutexType>
     return _InterlockedCompareExchange128 ( ( long long volatile * ) dest_, ex_new_.m128_long64[ hi_index<short> ( ) ],
                                             ex_new_.m128_long64[ lo_index<short> ( ) ], ( long long * ) cr_old_ );
 #endif
+}
+
+template<typename T1, typename T2, typename T3>
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( T1 volatile * dest_, T2 && ex_new_, T3 * cr_old_ ) noexcept {
+    return dwcas_implementation ( ( _m128 volatile * ) std::forward<T1 volatile *> ( dest_ ),
+                                  _m128{ std::forward<T2 &&> ( ex_new_ ) }, ( _m128 * ) std::forward<T3 *> ( cr_old_ ) );
 }
 
 HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
@@ -582,8 +588,8 @@ class unbounded_circular_list final {
             auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
             if constexpr ( SAX_SYNCED_OSTREAMS )
                 std::scoped_lock lock ( ostream_mutex );
-            out_ << "<s " << a ( &link_ ) << ' ' << a ( link_->prev ) << ' ' << a ( link_->next ) << '.' << link_->external_count
-                 << '>';
+            out_ << "<s " << a ( &link_ ) << ' ' << a ( link_->prev ) << ' ' << a ( link_->next ) << '.' << link_->internal_count
+                 << '-' << link_->external_count << '>';
             return out_;
         }
 
@@ -655,8 +661,7 @@ class unbounded_circular_list final {
         else
             store_sentinel ( new_node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
         // end of un-rolled loop
-        while ( not dwcas ( ( ( _m128 volatile * ) old.node ), _m128{ sentinel.load ( std::memory_order_relaxed ) },
-                            ( ( _m128 * ) new_node ) ) ) {
+        while ( not dwcas ( old.node, sentinel.load ( std::memory_order_relaxed ), new_node ) ) {
             old = sentinel.load ( std::memory_order_relaxed );
             std::memset ( ( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0, 1 );
             *( ( counted_link * ) new_node ) = counted_link{ link{ ( link * ) old.node, old.node->next }, 1 };
@@ -666,7 +671,7 @@ class unbounded_circular_list final {
                 store_sentinel ( new_node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
         }
         new_node->next->prev = new_node;
-        return std::forward<nodes_iterator> ( it_ );
+        return std::forward<nodes_iterator &&> ( it_ );
     }
 
     template<typename At>
@@ -750,13 +755,11 @@ class unbounded_circular_list final {
             do {
                 new_counter = *( ( counted_link * ) &old_sentinel );
                 new_counter.external_count += 1;
-            } while ( not dwcas ( ( _m128 volatile * ) &old_sentinel, _m128{ sentinel.load ( std::memory_order_relaxed ) },
-                                  ( _m128 * ) &new_counter ) );
+            } while ( not dwcas ( &old_sentinel, sentinel.load ( std::memory_order_relaxed ), &new_counter ) );
             old_sentinel.external_count = new_counter.external_count;
-            // we're poppin' go get the box
+            // we're poppin', go get the box
             if ( node_ptr node = old_sentinel.node; node ) {
-                if ( not dwcas ( ( _m128 volatile * ) &old_sentinel, _m128{ sentinel.load ( std::memory_order_relaxed ) },
-                                 ( _m128 * ) &node->next ) ) {
+                if ( not dwcas ( &old_sentinel, sentinel.load ( std::memory_order_relaxed ), &node->next ) ) {
                     unsigned long count_increase = old_sentinel.external_count - 2;
                     if ( node->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
                         delete_order_relaxed ( node );
