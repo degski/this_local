@@ -776,13 +776,14 @@ class unbounded_circular_list final {
         }
     }
 
-    class alignas ( 16 ) iterator final {
+    class alignas ( 16 ) concurrent_iterator final {
         friend class unbounded_circular_list;
+        friend class iterator;
 
         node_ptr node, end_node;
         long long skip_end; // will throw on (negative-) overflow, not handled
 
-        iterator ( node_ptr node_, node_ptr end_node_, long long end_passes_ ) noexcept :
+        concurrent_iterator ( node_ptr node_, node_ptr end_node_, long long end_passes_ ) noexcept :
             node{ std::forward<node_ptr> ( node_ ) }, end_node{ std::forward<node_ptr> ( end_node_ ) }, skip_end{
                 std::forward<long long> ( end_passes_ )
             } {}
@@ -800,42 +801,43 @@ class unbounded_circular_list final {
         public:
         using iterator_category = std::bidirectional_iterator_tag;
 
-        iterator ( iterator && ) noexcept      = default;
-        iterator ( iterator const & ) noexcept = default;
+        concurrent_iterator ( concurrent_iterator && ) noexcept      = default;
+        concurrent_iterator ( concurrent_iterator const & ) noexcept = default;
 
-        [[maybe_unused]] iterator & operator= ( iterator && ) noexcept = default;
-        [[maybe_unused]] iterator & operator= ( iterator const & ) noexcept = default;
+        [[maybe_unused]] concurrent_iterator & operator= ( concurrent_iterator && ) noexcept = default;
+        [[maybe_unused]] concurrent_iterator & operator= ( concurrent_iterator const & ) noexcept = default;
 
-        ~iterator ( ) = default;
+        ~concurrent_iterator ( ) = default;
 
-        [[maybe_unused]] iterator & operator++ ( ) noexcept {
+        [[maybe_unused]] concurrent_iterator & operator++ ( ) noexcept {
             node = ( node_ptr ) node->next;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
                 node = ( node_ptr ) node->next;
             return *this;
         }
-        [[maybe_unused]] iterator & operator-- ( ) noexcept {
+        [[maybe_unused]] concurrent_iterator & operator-- ( ) noexcept {
             if ( not node->prev )
-                repair_links_prev ( node );
+                unbounded_circular_list::repair_back_links ( node );
             node = ( node_ptr ) node->prev;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
                 node = node->prev;
             return *this;
         }
 
-        [[nodiscard]] bool operator== ( iterator const & r_ ) const noexcept { return node == r_.node; }
-        [[nodiscard]] bool operator!= ( iterator const & r_ ) const noexcept { return not operator== ( r_ ); }
+        [[nodiscard]] bool operator== ( concurrent_iterator const & r_ ) const noexcept { return node == r_.node; }
+        [[nodiscard]] bool operator!= ( concurrent_iterator const & r_ ) const noexcept { return not operator== ( r_ ); }
         [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
         [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
     };
 
-    class alignas ( 16 ) const_iterator final {
+    class alignas ( 16 ) concurrent_const_iterator final {
         friend class unbounded_circular_list;
+        friend class const_iterator;
 
         const_node_ptr node, end_node;
         long long skip_end; // will throw on (negative-) overflow, not handled
 
-        const_iterator ( const_node_ptr node_, const_node_ptr end_node_, long long end_passes_ ) noexcept :
+        concurrent_const_iterator ( const_node_ptr node_, const_node_ptr end_node_, long long end_passes_ ) noexcept :
             node{ std::forward<const_node_ptr> ( node_ ) }, end_node{ std::forward<const_node_ptr> ( end_node_ ) }, skip_end{
                 std::forward<long long> ( end_passes_ )
             } {}
@@ -853,97 +855,206 @@ class unbounded_circular_list final {
         public:
         using iterator_category = std::bidirectional_iterator_tag;
 
-        const_iterator ( const_iterator && ) noexcept      = default;
-        const_iterator ( const_iterator const & ) noexcept = default;
+        concurrent_const_iterator ( concurrent_const_iterator && ) noexcept      = default;
+        concurrent_const_iterator ( concurrent_const_iterator const & ) noexcept = default;
 
-        const_iterator ( iterator const & o_ ) noexcept : node{ o_.node }, end_node{ o_.end_node }, skip_end{ o_.skip_end } {}
+        concurrent_const_iterator ( concurrent_iterator const & o_ ) noexcept :
+            node{ o_.node }, end_node{ o_.end_node }, skip_end{ o_.skip_end } {}
 
-        [[maybe_unused]] const_iterator & operator= ( const_iterator && ) noexcept = default;
-        [[maybe_unused]] const_iterator & operator= ( const_iterator const & ) noexcept = default;
+        [[maybe_unused]] concurrent_const_iterator & operator= ( concurrent_const_iterator && ) noexcept = default;
+        [[maybe_unused]] concurrent_const_iterator & operator= ( concurrent_const_iterator const & ) noexcept = default;
 
-        [[maybe_unused]] const_iterator & operator= ( iterator const & o_ ) noexcept {
+        [[maybe_unused]] concurrent_const_iterator & operator= ( concurrent_iterator const & o_ ) noexcept {
             node     = o_.node;
             end_node = o_.end_node;
             skip_end = o_.skip_end;
         };
 
+        ~concurrent_const_iterator ( ) = default;
+
+        [[maybe_unused]] concurrent_const_iterator & operator++ ( ) noexcept {
+            node = node->next;
+            if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
+                node = ( const_node_ptr ) node->next;
+            return *this;
+        }
+        [[maybe_unused]] concurrent_const_iterator & operator-- ( ) noexcept {
+            if ( not node->prev )
+                unbounded_circular_list::repair_back_links ( node );
+            node = node->prev;
+            if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
+                node = ( const_node_ptr ) node->prev;
+            return *this;
+        }
+
+        [[nodiscard]] bool operator== ( concurrent_const_iterator const & r_ ) const noexcept { return node == r_.node; }
+        [[nodiscard]] bool operator!= ( concurrent_const_iterator const & r_ ) const noexcept { return not operator== ( r_ ); }
+        [[nodiscard]] const_reference operator* ( ) const noexcept { return node->data; }
+        [[nodiscard]] const_pointer operator-> ( ) const noexcept { return &node->data; }
+    };
+
+    private:
+    friend class concurrent_iterator;
+    friend class concurrent_const_iterator;
+    friend class iterator;
+    friend class const_iterator;
+
+    [[nodiscard]] concurrent_const_iterator end_implementation ( long long end_passes_ ) const noexcept {
+        return concurrent_const_iterator{ reinterpret_cast<const_node_ptr> ( &end_link ),
+                                          reinterpret_cast<const_node_ptr> ( &end_link ), std::forward<long long> ( end_passes_ ) };
+    }
+    [[nodiscard]] concurrent_const_iterator cend_implementation ( long long end_passes_ ) const noexcept {
+        return end_implementation ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] concurrent_iterator end_implementation ( long long end_passes_ ) noexcept {
+        return concurrent_iterator{ reinterpret_cast<node_ptr> ( &end_link ), reinterpret_cast<node_ptr> ( &end_link ),
+                                    std::forward<long long> ( end_passes_ ) };
+    }
+
+    public:
+    [[nodiscard]] concurrent_const_iterator concurrent_begin ( long long end_passes_ = 0 ) const noexcept {
+        return ++end_implementation ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] concurrent_const_iterator concurrent_cbegin ( long long end_passes_ = 0 ) const noexcept {
+        return begin ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] concurrent_iterator concurrent_begin ( long long end_passes_ = 0 ) noexcept {
+        return ++end_implementation ( std::forward<long long> ( end_passes_ ) );
+    }
+
+    [[nodiscard]] concurrent_const_iterator concurrent_rbegin ( long long end_passes_ = 0 ) const noexcept {
+        return --end_implementation ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] concurrent_const_iterator concurrent_crbegin ( long long end_passes_ = 0 ) const noexcept {
+        return rbegin ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] concurrent_iterator concurrent_rbegin ( long long end_passes_ = 0 ) noexcept {
+        return --end_implementation ( std::forward<long long> ( end_passes_ ) );
+    }
+
+    [[nodiscard]] concurrent_const_iterator concurrent_end ( long long end_passes_ = 0 ) const noexcept {
+        return end_implementation ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] concurrent_const_iterator concurrent_cend ( long long end_passes_ = 0 ) const noexcept {
+        return end ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] concurrent_iterator concurrent_end ( long long end_passes_ = 0 ) noexcept {
+        return end_implementation ( std::forward<long long> ( end_passes_ ) );
+    }
+
+    [[nodiscard]] concurrent_const_iterator concurrent_rend ( long long end_passes_ = 0 ) const noexcept {
+        return end ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] concurrent_const_iterator concurrent_crend ( long long end_passes_ = 0 ) const noexcept {
+        return rend ( std::forward<long long> ( end_passes_ ) );
+    }
+    [[nodiscard]] concurrent_iterator concurrent_rend ( long long end_passes_ = 0 ) noexcept {
+        return end ( std::forward<long long> ( end_passes_ ) );
+    }
+
+    class alignas ( 16 ) iterator final {
+        friend class unbounded_circular_list;
+
+        node_ptr node, end_node;
+
+        iterator ( node_ptr node_, node_ptr end_node_ ) noexcept :
+            node{ std::forward<node_ptr> ( node_ ) }, end_node{ std::forward<node_ptr> ( end_node_ ) } {}
+        iterator ( concurrent_iterator const & o_ ) noexcept {
+            node     = o_.node;
+            end_node = o_.end_node;
+        }
+
+        public:
+        using iterator_category = std::bidirectional_iterator_tag;
+
+        iterator ( iterator && ) noexcept      = default;
+        iterator ( iterator const & ) noexcept = default;
+
+        [[maybe_unused]] iterator & operator= ( iterator && ) noexcept = default;
+        [[maybe_unused]] iterator & operator= ( iterator const & ) noexcept = default;
+
+        ~iterator ( ) = default;
+
+        [[maybe_unused]] iterator & operator++ ( ) noexcept {
+            node = ( node_ptr ) node->next;
+            return *this;
+        }
+        [[maybe_unused]] iterator & operator-- ( ) noexcept {
+            node = ( node_ptr ) node->prev;
+            return *this;
+        }
+
+        [[nodiscard]] bool operator== ( iterator const & r_ ) const noexcept { return node == r_.node; }
+        [[nodiscard]] bool operator!= ( iterator const & r_ ) const noexcept { return not operator== ( r_ ); }
+        [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
+        [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
+    };
+
+    class alignas ( 16 ) const_iterator final {
+        friend class unbounded_circular_list;
+
+        const_node_ptr node, end_node;
+
+        const_iterator ( const_node_ptr node_, const_node_ptr end_node_ ) noexcept :
+            node{ std::forward<const_node_ptr> ( node_ ) }, end_node{ std::forward<const_node_ptr> ( end_node_ ) } {}
+        const_iterator ( concurrent_const_iterator const & o_ ) noexcept {
+            node     = o_.node;
+            end_node = o_.end_node;
+        }
+
+        public:
+        using iterator_category = std::bidirectional_iterator_tag;
+
+        const_iterator ( const_iterator && ) noexcept      = default;
+        const_iterator ( const_iterator const & ) noexcept = default;
+
+        [[maybe_unused]] const_iterator & operator= ( const_iterator && ) noexcept = default;
+        [[maybe_unused]] const_iterator & operator= ( const_iterator const & ) noexcept = default;
+
         ~const_iterator ( ) = default;
 
         [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
-            node = node->next;
-            if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
-                node = ( node_ptr ) node->next;
+            node = ( const_node_ptr ) node->next;
             return *this;
         }
         [[maybe_unused]] const_iterator & operator-- ( ) noexcept {
-            if ( not node->prev )
-                repair_links_prev ( ( node_ptr ) node );
-            node = node->prev;
-            if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
-                node = ( node_ptr ) node->prev;
+            node = ( const_node_ptr ) node->prev;
             return *this;
         }
 
         [[nodiscard]] bool operator== ( const_iterator const & r_ ) const noexcept { return node == r_.node; }
         [[nodiscard]] bool operator!= ( const_iterator const & r_ ) const noexcept { return not operator== ( r_ ); }
-        [[nodiscard]] reference operator* ( ) const noexcept { return node->data; }
-        [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
+        [[nodiscard]] const_reference operator* ( ) const noexcept { return node->data; }
+        [[nodiscard]] const_pointer operator-> ( ) const noexcept { return &node->data; }
     };
 
-    private:
-    friend class iterator;
-    friend class const_iterator;
+    [[nodiscard]] const_iterator begin ( ) const noexcept { return ++end_implementation ( 0 ); }
+    [[nodiscard]] const_iterator cbegin ( ) const noexcept { return ++cend_implementation ( 0 ); }
+    [[nodiscard]] iterator begin ( ) noexcept { return ++end_implementation ( 0 ); }
+    [[nodiscard]] const_iterator end ( ) const noexcept { return end_implementation ( 0 ); }
+    [[nodiscard]] const_iterator cend ( ) const noexcept { return cend_implementation ( 0 ); }
+    [[nodiscard]] iterator end ( ) noexcept { return end_implementation ( 0 ); }
 
-    [[nodiscard]] const_iterator end_implementation ( long long end_passes_ ) const noexcept {
-        return const_iterator{ reinterpret_cast<const_node_ptr> ( &end_link ), reinterpret_cast<const_node_ptr> ( &end_link ),
-                               std::forward<long long> ( end_passes_ ) };
-    }
-    [[nodiscard]] const_iterator cend_implementation ( long long end_passes_ ) const noexcept {
-        return end_implementation ( std::forward<long long> ( end_passes_ ) );
-    }
-    [[nodiscard]] iterator end_implementation ( long long end_passes_ ) noexcept {
-        return iterator{ reinterpret_cast<node_ptr> ( &end_link ), reinterpret_cast<node_ptr> ( &end_link ),
-                         std::forward<long long> ( end_passes_ ) };
+    [[nodiscard]] const_iterator rbegin ( ) const noexcept { return --end_implementation ( 0 ); }
+    [[nodiscard]] const_iterator crbegin ( ) const noexcept { return --cend_implementation ( 0 ); }
+    [[nodiscard]] iterator rbegin ( ) noexcept { return --end_implementation ( 0 ); }
+    [[nodiscard]] const_iterator rend ( ) const noexcept { return end_implementation ( 0 ); }
+    [[nodiscard]] const_iterator crend ( ) const noexcept { return cend_implementation ( 0 ); }
+    [[nodiscard]] iterator rend ( ) noexcept { return end_implementation ( 0 ); }
+
+    private:
+    static void repair_back_links ( node_ptr node_ ) noexcept {
+        if ( HEDLEY_LIKELY ( node_ ) ) {
+            counted_link * node = ( counted_link * ) node_->next_;
+            while ( HEDLEY_LIKELY ( node != ( ( counted_link * ) node_ ) ) ) {
+                node->prev = ( counted_link * ) node;
+                node       = node->next;
+            }
+        }
     }
 
     public:
-    [[nodiscard]] const_iterator begin ( long long end_passes_ = 0 ) const noexcept {
-        return ++end_implementation ( std::forward<long long> ( end_passes_ ) );
-    }
-    [[nodiscard]] const_iterator cbegin ( long long end_passes_ = 0 ) const noexcept {
-        return begin ( std::forward<long long> ( end_passes_ ) );
-    }
-    [[nodiscard]] iterator begin ( long long end_passes_ = 0 ) noexcept {
-        return ++end_implementation ( std::forward<long long> ( end_passes_ ) );
-    }
-
-    [[nodiscard]] const_iterator rbegin ( long long end_passes_ = 0 ) const noexcept {
-        return --end_implementation ( std::forward<long long> ( end_passes_ ) );
-    }
-    [[nodiscard]] const_iterator crbegin ( long long end_passes_ = 0 ) const noexcept {
-        return rbegin ( std::forward<long long> ( end_passes_ ) );
-    }
-    [[nodiscard]] iterator rbegin ( long long end_passes_ = 0 ) noexcept {
-        return --end_implementation ( std::forward<long long> ( end_passes_ ) );
-    }
-
-    [[nodiscard]] const_iterator end ( long long end_passes_ = 0 ) const noexcept {
-        return end_implementation ( std::forward<long long> ( end_passes_ ) );
-    }
-    [[nodiscard]] const_iterator cend ( long long end_passes_ = 0 ) const noexcept {
-        return end ( std::forward<long long> ( end_passes_ ) );
-    }
-    [[nodiscard]] iterator end ( long long end_passes_ = 0 ) noexcept {
-        return end_implementation ( std::forward<long long> ( end_passes_ ) );
-    }
-
-    [[nodiscard]] const_iterator rend ( long long end_passes_ = 0 ) const noexcept {
-        return end ( std::forward<long long> ( end_passes_ ) );
-    }
-    [[nodiscard]] const_iterator crend ( long long end_passes_ = 0 ) const noexcept {
-        return rend ( std::forward<long long> ( end_passes_ ) );
-    }
-    [[nodiscard]] iterator rend ( long long end_passes_ = 0 ) noexcept { return end ( std::forward<long long> ( end_passes_ ) ); }
+    void repair_back_links ( ) noexcept { repair_back_links ( ( node_ptr ) end_link ); }
 
     template<typename Stream>
     std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> ostream ( Stream & out_ ) noexcept {
@@ -958,7 +1069,7 @@ class unbounded_circular_list final {
     operator<< ( Stream & out_, unbounded_circular_list const & list_ ) noexcept {
         return list_.ostream ( out_ );
     }
-};
+}; // namespace lockless
 
 } // namespace lockless
 
@@ -1017,8 +1128,8 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     private:
     using nodes_type = plf::colony<node, typename Allocator::template rebind<node>::other>;
 
-    using nodes_iterator       = typename nodes_type::iterator;
-    using nodes_const_iterator = typename nodes_type::const_iterator;
+    using nodes_iterator       = typename nodes_type::concurrent_iterator;
+    using nodes_const_iterator = typename nodes_type::concurrent_const_iterator;
 
     nodes_type nodes;
     std::atomic<counted_link> head;
