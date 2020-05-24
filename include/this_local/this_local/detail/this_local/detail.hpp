@@ -887,16 +887,18 @@ class unbounded_circular_list final {
                 if ( not dwcas ( ( _m128 volatile * ) &old_sentinel, _m128{ sentinel.load ( std::memory_order_relaxed ) },
                                  ( _m128 * ) &node->next ) ) {
                     unsigned long count_increase = old_sentinel.external_count - 2;
-                    if ( node->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
+                    if ( node->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase ) {
+                        node->next->prev = node->prev; // update back-link
+                        node->prev->next = node->next; // update back-link
                         nodes.erase ( nodes.get_iterator_from_pointer ( node ) );
-                    // update back-link
-                    node->prev->next = node->next;
-                    node->next->prev = node->prev;
+                    }
                     return;
                 }
                 else {
                     if ( node->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 ) {
-                        auto _ = node->internal_count.load ( std::memory_order_acquire );
+                        auto _           = node->internal_count.load ( std::memory_order_acquire );
+                        node->next->prev = node->prev; // update back-link
+                        node->prev->next = node->next; // update back-link
                         nodes.erase ( nodes.get_iterator_from_pointer ( node ) );
                     }
                 }
