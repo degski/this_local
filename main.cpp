@@ -167,36 +167,35 @@ typename this_concurrent_vector<ValueType, ThisLocalType>::this_local_type
 template<typename Type>
 std::tuple<std::thread::id, int> work ( Type & t_ ) {
     test::micro_sleep ( );
-    t_.emplace ( test::get_id ( ) );
+    // t_.emplace ( test::get_id ( ) );
+    t_.emplace ( std::this_thread::get_id ( ) );
     test::micro_sleep ( );
     // t_.this_local_storage.destroy ( std::this_thread::get_id ( ) ); // call the thread-destructor
     return { std::this_thread::get_id ( ), test::get_id ( ) };
 }
 
-/*
+int main_function_main ( ) {
 
-int main5686780 ( ) {
+    using circ_list = sax::lockless::unbounded_circular_list<std::thread::id>;
 
-    this_concurrent_vector<std::thread::id, int> ids;
+    circ_list ids;
 
     std::uint64_t duration;
     plf::nanotimer timer;
     timer.start ( );
 
     for ( int n = 0; n < 32; ++n )
-        std::jthread{ work<this_concurrent_vector<std::thread::id, int>>, std::ref ( ids ) };
+        std::jthread{ work<circ_list>, std::ref ( ids ) };
 
     duration = static_cast<std::uint64_t> ( timer.get_elapsed_ms ( ) );
     std::cout << nl << duration << "ms" << nl;
 
-    for ( auto id : ids.vector )
+    for ( auto id : ids )
         std::cout << id << sp;
     std::cout << nl;
 
     return EXIT_SUCCESS;
 }
-
-*/
 
 int main_function_0 ( ) {
 
@@ -272,7 +271,7 @@ int main_function_0 ( ) {
 
 int main ( ) {
 
-    main_function_0 ( );
+    main_function_main ( );
     std::cout << nl;
 
     return EXIT_SUCCESS;

@@ -107,13 +107,13 @@ template<typename ValueType>
 abbreviate_pointer_implementation ( std::uintptr_t pointer_ ) noexcept {
     //
     // Byte 8 is empty, byte 7 used to be empty but is now 'reserved' by Microsoft The 'old' 48-bit pointer corresponds to the
-    // addressable space of Intel hardware. The below implemented mapping from 2^64 space to 2^16 space, results in 64 duplicates
-    // (collisions if you want) per pointer. I think in practice (because the space is not cut up randomly, but split into
-    // user/kernel space) the chance of collissions is remotely small.
+    // addressable space of Intel hardware (we'll ignore this one). The below implemented mapping from 2^48 space to 2^16 space,
+    // results 2^32 theroretical collisions per pointer. I think in practice (because the space is not cut up randomly, but split
+    // into user/kernel space and probably many more partitions internally) the chance of collissions is fairly small.
     //
-    pointer_ ^= pointer_ >> 16; // 2 dups (4 for a 16-bit shift, but hi.hi.hi and hi.hi.lo are empty, so 2)
-    pointer_ ^= pointer_ >> 32; // 2 * 8 dups
-    pointer_ ^= pointer_ >> 16; // 2 * 8 * 4 dups
+    pointer_ ^= pointer_ >> 16;
+    pointer_ ^= pointer_ >> 32;
+    pointer_ ^= pointer_ >> 16;
     return ( std::uint16_t ) pointer_;
 }
 } // namespace detail
@@ -216,6 +216,10 @@ union alignas ( 8 ) _m64 {
     _m64 ( ValueType const & v_ ) noexcept {
         memcpy ( this, &v_, sizeof ( _m64 ) );
     }
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m64 )>>
+    _m64 ( ValueType && v_ ) noexcept {
+        memcpy ( this, &v_, sizeof ( _m64 ) );
+    }
 
     template<typename HalfSizeValueType, typename = std::enable_if_t<sizeof ( HalfSizeValueType ) >= sizeof ( __m64 )>>
     _m64 ( HalfSizeValueType const & o0_, HalfSizeValueType const & o1_ ) noexcept {
@@ -230,6 +234,11 @@ union alignas ( 8 ) _m64 {
         memcpy ( this, &v_, sizeof ( _m64 ) );
         return *this;
     }
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m64 )>>
+    std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m64 ), _m64> operator= ( ValueType && v_ ) noexcept {
+        memcpy ( this, &v_, sizeof ( _m64 ) );
+        return *this;
+    }
 
     template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m64 )>>
     [[nodiscard]] bool operator== ( ValueType const & r_ ) const noexcept {
@@ -239,11 +248,6 @@ union alignas ( 8 ) _m64 {
     [[nodiscard]] bool operator!= ( ValueType const & r_ ) const noexcept {
         return unequal_m64 ( this, &r_ );
     }
-
-    template<typename ValueType>
-    _m64 ( ValueType && ) = delete;
-    template<typename ValueType>
-    [[nodiscard]] _m64 operator= ( ValueType && ) = delete;
 };
 union alignas ( 16 ) _m128 {
 
@@ -260,6 +264,10 @@ union alignas ( 16 ) _m128 {
     _m128 ( ValueType const & v_ ) noexcept {
         memcpy ( this, &v_, sizeof ( _m128 ) );
     }
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m128 )>>
+    _m128 ( ValueType && v_ ) noexcept {
+        memcpy ( this, &v_, sizeof ( _m128 ) );
+    }
 
     template<typename HalfSizeValueType, typename = std::enable_if_t<sizeof ( HalfSizeValueType ) >= sizeof ( __m64 )>>
     _m128 ( HalfSizeValueType const & o0_, HalfSizeValueType const & o1_ ) noexcept {
@@ -274,6 +282,11 @@ union alignas ( 16 ) _m128 {
         memcpy ( this, &v_, sizeof ( _m128 ) );
         return *this;
     }
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m128 )>>
+    std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m128 ), _m128> operator= ( ValueType && v_ ) noexcept {
+        memcpy ( this, &v_, sizeof ( _m128 ) );
+        return *this;
+    }
 
     template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m128 )>>
     [[nodiscard]] bool operator== ( ValueType const & r_ ) const noexcept {
@@ -283,11 +296,6 @@ union alignas ( 16 ) _m128 {
     [[nodiscard]] bool operator!= ( ValueType const & r_ ) const noexcept {
         return unequal_m128 ( this, &r_ );
     }
-
-    template<typename ValueType>
-    _m128 ( ValueType && ) = delete;
-    template<typename ValueType>
-    [[nodiscard]] _m128 operator= ( ValueType && ) = delete;
 };
 
 union alignas ( 32 ) _m256 {
@@ -301,6 +309,10 @@ union alignas ( 32 ) _m256 {
 
     template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m256 )>>
     _m256 ( ValueType const & v_ ) noexcept {
+        memcpy ( this, &v_, sizeof ( _m256 ) );
+    }
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m256 )>>
+    _m256 ( ValueType && v_ ) noexcept {
         memcpy ( this, &v_, sizeof ( _m256 ) );
     }
 
@@ -317,6 +329,11 @@ union alignas ( 32 ) _m256 {
         memcpy ( this, &v_, sizeof ( _m256 ) );
         return *this;
     }
+    template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m256 )>>
+    std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m256 ), _m256> operator= ( ValueType && v_ ) noexcept {
+        memcpy ( this, &v_, sizeof ( _m256 ) );
+        return *this;
+    }
 
     template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m256 )>>
     [[nodiscard]] bool operator== ( ValueType const & r_ ) const noexcept {
@@ -326,11 +343,6 @@ union alignas ( 32 ) _m256 {
     [[nodiscard]] bool operator!= ( ValueType const & r_ ) const noexcept {
         return unequal_m256 ( this, &r_ );
     }
-
-    template<typename ValueType>
-    _m256 ( ValueType && ) = delete;
-    template<typename ValueType>
-    [[nodiscard]] _m256 operator= ( ValueType && ) = delete;
 };
 
 template<typename ValueType>
@@ -478,18 +490,19 @@ struct slim_rw_lock final {
     ;                                                                                                                              \
     ;
 
-alignas ( 64 ) inline static lockless::spin_rw_lock<long long> ostream;
+alignas ( 64 ) inline static lockless::spin_rw_lock<long long> ostream_mutex;
 
 struct front_insertion {};
 struct back_insertion {};
 
 namespace lockless {
-template<typename ValueType, typename Allocator = std::allocator<ValueType>, typename DefaultInsertionMode = back_insertion>
+template<typename ValueType, template<typename> typename Allocator = std::allocator, typename DefaultInsertionMode = back_insertion>
 class unbounded_circular_list final {
 
     public:
-    using value_type             = ValueType;
-    using allocator              = Allocator;
+    using value_type = ValueType;
+    template<typename Type>
+    using allocator              = Allocator<Type>;
     using default_insertion_mode = DefaultInsertionMode;
 
     struct front_insertion {};
@@ -509,8 +522,8 @@ class unbounded_circular_list final {
                                                                                              link const & link_ ) noexcept {
             auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
             if constexpr ( SAX_SYNCED_OSTREAMS )
-                std::scoped_lock lock ( ostream );
-            out_ << '<l ' << a ( link_.prev ) << ' ' << a ( link_.next ) << '>';
+                std::scoped_lock lock ( ostream_mutex );
+            out_ << "<l " << a ( link_.prev ) << ' ' << a ( link_.next ) << '>';
             return out_;
         }
     };
@@ -523,8 +536,8 @@ class unbounded_circular_list final {
                                                                                              counted_link const & link_ ) noexcept {
             auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
             if constexpr ( SAX_SYNCED_OSTREAMS )
-                std::scoped_lock lock ( ostream );
-            out_ << '<c ' << a ( link_.prev ) << ' ' << a ( link_.next ) << '.' << link_.external_count << '>';
+                std::scoped_lock lock ( ostream_mutex );
+            out_ << "<c " << a ( link_.prev ) << ' ' << a ( link_.next ) << '.' << link_.external_count << '>';
             return out_;
         }
     };
@@ -543,8 +556,8 @@ class unbounded_circular_list final {
                                                                                              node const * link_ ) noexcept {
             auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
             if constexpr ( SAX_SYNCED_OSTREAMS )
-                std::scoped_lock lock ( ostream );
-            out_ << '<n ' << a ( &*link_ ) << ' ' << a ( link_->prev ) << ' ' << a ( link_->next ) << '.' << link_->internal_count
+                std::scoped_lock lock ( ostream_mutex );
+            out_ << "<n " << a ( &*link_ ) << ' ' << a ( link_->prev ) << ' ' << a ( link_->next ) << '.' << link_->internal_count
                  << '-' << link_->external_count << '>';
             return out_;
         }
@@ -568,8 +581,8 @@ class unbounded_circular_list final {
         operator<< ( Stream & out_, counted_sentinel const & link_ ) noexcept {
             auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
             if constexpr ( SAX_SYNCED_OSTREAMS )
-                std::scoped_lock lock ( ostream );
-            out_ << '<s ' << a ( &link_ ) << ' ' << a ( link_->prev ) << ' ' << a ( link_->next ) << '.' << link_->external_count
+                std::scoped_lock lock ( ostream_mutex );
+            out_ << "<s " << a ( &link_ ) << ' ' << a ( link_->prev ) << ' ' << a ( link_->next ) << '.' << link_->external_count
                  << '>';
             return out_;
         }
@@ -580,7 +593,7 @@ class unbounded_circular_list final {
     using counted_end_link_ptr       = counted_sentinel *;
     using const_counted_end_link_ptr = counted_sentinel const *;
 
-    using nodes_type = plf::colony<node, typename Allocator::template rebind<node>::other>;
+    using nodes_type = plf::colony<node, allocator<node>>;
 
     // exposes the underlying container (not safe)
 
@@ -653,7 +666,7 @@ class unbounded_circular_list final {
         else
             store_sentinel ( new_node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
         // end of un-rolled loop
-        while ( not dwcas ( ( ( _m128 volatile * ) old.node ), make_m128 ( sentinel.load ( std::memory_order_relaxed ) ),
+        while ( not dwcas ( ( ( _m128 volatile * ) old.node ), _m128{ sentinel.load ( std::memory_order_relaxed ) },
                             ( ( _m128 * ) new_node ) ) ) {
             old = sentinel.load ( std::memory_order_relaxed );
             std::memset ( ( ( ( char * ) &old.node ) + hi_index<node_ptr> ( ) ), 0, 1 );
@@ -750,13 +763,13 @@ class unbounded_circular_list final {
         ~iterator ( ) = default;
 
         [[maybe_unused]] iterator & operator++ ( ) noexcept {
-            node = node->next;
+            node = ( node_ptr ) node->next;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
-                node = node->next;
+                node = ( node_ptr ) node->next;
             return *this;
         }
         [[maybe_unused]] iterator & operator-- ( ) noexcept {
-            node = node->prev;
+            node = ( node_ptr ) node->prev;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
                 node = node->prev;
             return *this;
@@ -801,13 +814,13 @@ class unbounded_circular_list final {
         [[maybe_unused]] const_iterator & operator++ ( ) noexcept {
             node = node->next;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
-                node = node->next;
+                node = ( node_ptr ) node->next;
             return *this;
         }
         [[maybe_unused]] const_iterator & operator-- ( ) noexcept {
             node = node->prev;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
-                node = node->prev;
+                node = ( node_ptr ) node->prev;
             return *this;
         }
 
@@ -826,7 +839,8 @@ class unbounded_circular_list final {
         return end_implementation ( std::forward<long long> ( end_passes_ ) );
     }
     [[nodiscard]] iterator end_implementation ( long long end_passes_ ) noexcept {
-        return const_cast<iterator> ( std::as_const ( this ) )->end_implementation ( std::forward<long long> ( end_passes_ ) );
+        return iterator{ reinterpret_cast<node_ptr> ( &end_link ), reinterpret_cast<node_ptr> ( &end_link ),
+                         std::forward<long long> ( end_passes_ ) };
     }
 
     public:
@@ -837,7 +851,7 @@ class unbounded_circular_list final {
         return begin ( std::forward<long long> ( end_passes_ ) );
     }
     [[nodiscard]] iterator begin ( long long end_passes_ = 0 ) noexcept {
-        return const_cast<iterator> ( std::as_const ( this ) )->begin ( std::forward<long long> ( end_passes_ ) );
+        return ++end_implementation ( std::forward<long long> ( end_passes_ ) );
     }
 
     [[nodiscard]] const_iterator rbegin ( long long end_passes_ = 0 ) const noexcept {
@@ -847,7 +861,7 @@ class unbounded_circular_list final {
         return rbegin ( std::forward<long long> ( end_passes_ ) );
     }
     [[nodiscard]] iterator rbegin ( long long end_passes_ = 0 ) noexcept {
-        return const_cast<iterator> ( std::as_const ( this ) )->rbegin ( std::forward<long long> ( end_passes_ ) );
+        return --end_implementation ( std::forward<long long> ( end_passes_ ) );
     }
 
     [[nodiscard]] const_iterator end ( long long end_passes_ = 0 ) const noexcept {
@@ -857,7 +871,7 @@ class unbounded_circular_list final {
         return end ( std::forward<long long> ( end_passes_ ) );
     }
     [[nodiscard]] iterator end ( long long end_passes_ = 0 ) noexcept {
-        return const_cast<iterator> ( std::as_const ( this ) )->end ( std::forward<long long> ( end_passes_ ) );
+        return end_implementation ( std::forward<long long> ( end_passes_ ) );
     }
 
     [[nodiscard]] const_iterator rend ( long long end_passes_ = 0 ) const noexcept {
@@ -866,9 +880,7 @@ class unbounded_circular_list final {
     [[nodiscard]] const_iterator crend ( long long end_passes_ = 0 ) const noexcept {
         return rend ( std::forward<long long> ( end_passes_ ) );
     }
-    [[nodiscard]] iterator rend ( long long end_passes_ = 0 ) noexcept {
-        return const_cast<iterator> ( std::as_const ( this ) )->rend ( std::forward<long long> ( end_passes_ ) );
-    }
+    [[nodiscard]] iterator rend ( long long end_passes_ = 0 ) noexcept { return end ( std::forward<long long> ( end_passes_ ) ); }
 
     /*
     void pop ( ) noexcept {
