@@ -205,7 +205,7 @@ inline constexpr int lo_index ( ) noexcept {
     return not equal_m256 ( a_, b_ );
 }
 
-union alignas ( 8 ) _m64 {
+union _m64 {
 
     __m64 m64_m64;
     __int32 m64_m32[ 4 ];
@@ -249,7 +249,7 @@ union alignas ( 8 ) _m64 {
         return unequal_m64 ( this, &r_ );
     }
 };
-union alignas ( 16 ) _m128 {
+union _m128 {
 
     __m128 m128_m128;
     __m64 m128_m64[ 2 ];
@@ -298,7 +298,7 @@ union alignas ( 16 ) _m128 {
     }
 };
 
-union alignas ( 32 ) _m256 {
+union _m256 {
 
     __m256 m256_m256;
     __m128 m256_m128[ 2 ];
@@ -400,8 +400,8 @@ template<typename MutexType>
 
 template<typename T1, typename T2, typename T3>
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( T1 volatile * dest_, T2 && ex_new_, T3 * cr_old_ ) noexcept {
-    return dwcas_implementation ( ( _m128 volatile * ) std::forward<T1 volatile *> ( dest_ ),
-                                  _m128{ std::forward<T2 &&> ( ex_new_ ) }, ( _m128 * ) std::forward<T3 *> ( cr_old_ ) );
+    return dwcas_implementation ( ( _m128 volatile * ) std::forward<T1 volatile *> ( dest_ ), _m128{ std::forward<T2> ( ex_new_ ) },
+                                  ( _m128 * ) std::forward<T3 *> ( cr_old_ ) );
 }
 
 HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
@@ -520,8 +520,8 @@ class unbounded_circular_list final {
     using reference       = ValueType &;
     using const_reference = ValueType const &;
 
-    struct alignas ( 16 ) link {
-        link *prev, *next;
+    struct link {
+        alignas ( 16 ) link * prev, *next;
 
         template<typename Stream>
         [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> operator<< ( Stream & out_,
@@ -776,11 +776,11 @@ class unbounded_circular_list final {
         }
     }
 
-    class alignas ( 16 ) concurrent_iterator final {
+    class concurrent_iterator final {
         friend class unbounded_circular_list;
         friend class iterator;
 
-        node_ptr node, end_node;
+        alignas ( 16 ) node_ptr node, end_node;
         long long skip_end; // will throw on (negative-) overflow, not handled
 
         concurrent_iterator ( node_ptr node_, node_ptr end_node_, long long end_passes_ ) noexcept :
@@ -830,11 +830,11 @@ class unbounded_circular_list final {
         [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
     };
 
-    class alignas ( 16 ) const_concurrent_iterator final {
+    class const_concurrent_iterator final {
         friend class unbounded_circular_list;
         friend class const_iterator;
 
-        const_node_ptr node, end_node;
+        alignas ( 16 ) const_node_ptr node, end_node;
         long long skip_end; // will throw on (negative-) overflow, not handled
 
         const_concurrent_iterator ( const_node_ptr node_, const_node_ptr end_node_, long long end_passes_ ) noexcept :
@@ -952,10 +952,10 @@ class unbounded_circular_list final {
         return end ( std::forward<long long> ( end_passes_ ) );
     }
 
-    class alignas ( 16 ) iterator final {
+    class iterator final {
         friend class unbounded_circular_list;
 
-        node_ptr node, end_node;
+        alignas ( 16 ) node_ptr node, end_node;
 
         iterator ( node_ptr node_, node_ptr end_node_ ) noexcept :
             node{ std::forward<node_ptr> ( node_ ) }, end_node{ std::forward<node_ptr> ( end_node_ ) } {}
@@ -990,10 +990,10 @@ class unbounded_circular_list final {
         [[nodiscard]] pointer operator-> ( ) const noexcept { return &node->data; }
     };
 
-    class alignas ( 16 ) const_iterator final {
+    class const_iterator final {
         friend class unbounded_circular_list;
 
-        const_node_ptr node, end_node;
+        alignas ( 16 ) const_node_ptr node, end_node;
 
         const_iterator ( const_node_ptr node_, const_node_ptr end_node_ ) noexcept :
             node{ std::forward<const_node_ptr> ( node_ ) }, end_node{ std::forward<const_node_ptr> ( end_node_ ) } {}
@@ -1069,7 +1069,7 @@ class unbounded_circular_list final {
     operator<< ( Stream & out_, unbounded_circular_list const & list_ ) noexcept {
         return list_.ostream ( out_ );
     }
-}; // namespace lockless
+};
 
 } // namespace lockless
 
