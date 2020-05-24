@@ -604,13 +604,13 @@ class unbounded_circular_list final {
     // exposes the underlying container (not safe)
 
     using nodes_iterator       = typename nodes_type::iterator;
-    using nodes_const_iterator = typename nodes_type::const_iterator;
+    using const_nodes_iterator = typename nodes_type::const_iterator;
 
-    [[nodiscard]] nodes_const_iterator nodes_begin ( ) const noexcept { return nodes.begin ( ); }
-    [[nodiscard]] nodes_const_iterator nodes_cbegin ( ) const noexcept { return nodes.cbegin ( ); }
+    [[nodiscard]] const_nodes_iterator nodes_begin ( ) const noexcept { return nodes.begin ( ); }
+    [[nodiscard]] const_nodes_iterator nodes_cbegin ( ) const noexcept { return nodes.cbegin ( ); }
     [[nodiscard]] nodes_iterator nodes_begin ( ) noexcept { return nodes.begin ( ); }
-    [[nodiscard]] nodes_const_iterator nodes_end ( ) const noexcept { return nodes.end ( ); }
-    [[nodiscard]] nodes_const_iterator nodes_cend ( ) const noexcept { return nodes.cend ( ); }
+    [[nodiscard]] const_nodes_iterator nodes_end ( ) const noexcept { return nodes.end ( ); }
+    [[nodiscard]] const_nodes_iterator nodes_cend ( ) const noexcept { return nodes.cend ( ); }
     [[nodiscard]] nodes_iterator nodes_end ( ) noexcept { return nodes.end ( ); }
 
     // class variables
@@ -625,7 +625,7 @@ class unbounded_circular_list final {
     nodes_iterator ( unbounded_circular_list::*insert_front_implementation ) ( nodes_iterator && ) noexcept;
     nodes_iterator ( unbounded_circular_list::*insert_back_implementation ) ( nodes_iterator && ) noexcept;
 
-    // constructors (insert at the back)
+    // constructors
 
     public:
     unbounded_circular_list ( ) :
@@ -1109,7 +1109,7 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
     using nodes_type = plf::colony<node, typename Allocator::template rebind<node>::other>;
 
     using nodes_iterator       = typename nodes_type::concurrent_iterator;
-    using nodes_const_iterator = typename nodes_type::const_concurrent_iterator;
+    using const_nodes_iterator = typename nodes_type::const_concurrent_iterator;
 
     nodes_type nodes;
     std::atomic<counted_link> head;
@@ -1174,11 +1174,11 @@ class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed.
         }
     }
 
-    [[nodiscard]] nodes_const_iterator begin ( ) const noexcept { return nodes.begin ( ); }
-    [[nodiscard]] nodes_const_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
+    [[nodiscard]] const_nodes_iterator begin ( ) const noexcept { return nodes.begin ( ); }
+    [[nodiscard]] const_nodes_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
     [[nodiscard]] nodes_iterator begin ( ) noexcept { return nodes.begin ( ); }
-    [[nodiscard]] nodes_const_iterator end ( ) const noexcept { return nodes.end ( ); }
-    [[nodiscard]] nodes_const_iterator cend ( ) const noexcept { return nodes.cend ( ); }
+    [[nodiscard]] const_nodes_iterator end ( ) const noexcept { return nodes.end ( ); }
+    [[nodiscard]] const_nodes_iterator cend ( ) const noexcept { return nodes.cend ( ); }
     [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
 
     counted_link init_head ( ) {
