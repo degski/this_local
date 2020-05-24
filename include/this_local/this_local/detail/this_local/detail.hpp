@@ -731,35 +731,16 @@ class unbounded_circular_list final {
 
     private:
     template<bool MemoryOrderAcquire>
-    void delete_order_implementation ( node_ptr node_ ) noexcept {
+    void delete_implementation ( node_ptr node_ ) noexcept {
         if constexpr ( MemoryOrderAcquire )
             auto const _ = node_->internal_count.load ( std::memory_order_acquire );
-        if ( node_->next )
-            node_->next->prev = node_->prev; // update back-link
-        if ( node_->prev )
-            node_->prev->next = node_->next; // update back-link
-        node_->prev = node_->next = nullptr; // update node, stale node might point to this node
         nodes.erase ( nodes.get_iterator_from_pointer ( node_ ) );
     }
 
-    void delete_order_relaxed ( node_ptr node_ ) noexcept {
-        delete_order_implementation<false> ( std::forward<node_ptr> ( node_ ) );
-    }
-    void delete_order_acquire ( node_ptr node_ ) noexcept {
-        delete_order_implementation<true> ( std::forward<node_ptr> ( node_ ) );
-    }
+    void delete_order_relaxed ( node_ptr node_ ) noexcept { delete_implementation<false> ( std::forward<node_ptr> ( node_ ) ); }
+    void delete_order_acquire ( node_ptr node_ ) noexcept { delete_implementation<true> ( std::forward<node_ptr> ( node_ ) ); }
 
     public:
-    static void repair_all_link_prev ( node_ptr node_ ) noexcept {
-        if ( HEDLEY_LIKELY ( node_ ) ) {
-            counted_link * node = node_->next_;
-            while ( HEDLEY_LIKELY ( node != node_ ) ) {
-                node->prev = ( counted_link * ) node;
-                node       = node->next;
-            }
-        }
-    }
-
     void pop ( ) noexcept {
         counted_sentinel volatile old_sentinel = sentinel.load ( std::memory_order_relaxed );
         for ( ever ) {
@@ -802,6 +783,16 @@ class unbounded_circular_list final {
                 std::forward<long long> ( end_passes_ )
             } {}
 
+        void repair_links_prev ( node_ptr node_ ) noexcept {
+            if ( HEDLEY_LIKELY ( node_ ) ) {
+                counted_link * node = node_->next_;
+                while ( HEDLEY_LIKELY ( node != node_ ) ) {
+                    node->prev = ( counted_link * ) node;
+                    node       = node->next;
+                }
+            }
+        }
+
         public:
         using iterator_category = std::bidirectional_iterator_tag;
 
@@ -821,7 +812,7 @@ class unbounded_circular_list final {
         }
         [[maybe_unused]] iterator & operator-- ( ) noexcept {
             if ( not node->prev )
-                unbounded_circular_list::repair_all_link_prev ( ( node_ptr ) node );
+                repair_links_prev ( ( node_ptr ) node );
             node = ( node_ptr ) node->prev;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
                 node = node->prev;
@@ -844,6 +835,16 @@ class unbounded_circular_list final {
             node{ std::forward<const_node_ptr> ( node_ ) }, end_node{ std::forward<const_node_ptr> ( end_node_ ) }, skip_end{
                 std::forward<long long> ( end_passes_ )
             } {}
+
+        void repair_links_prev ( const_node_ptr node_ ) noexcept {
+            if ( HEDLEY_LIKELY ( node_ ) ) {
+                counted_link * node = node_->next_;
+                while ( HEDLEY_LIKELY ( node != ( ( node_ptr ) node_ ) ) ) {
+                    node->prev = ( counted_link * ) node;
+                    node       = node->next;
+                }
+            }
+        }
 
         public:
         using iterator_category = std::bidirectional_iterator_tag;
@@ -872,7 +873,7 @@ class unbounded_circular_list final {
         }
         [[maybe_unused]] const_iterator & operator-- ( ) noexcept {
             if ( not node->prev )
-                unbounded_circular_list::repair_all_link_prev ( ( node_ptr ) node );
+                repair_links_prev ( ( node_ptr ) node );
             node = node->prev;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
                 node = ( node_ptr ) node->prev;
@@ -886,6 +887,9 @@ class unbounded_circular_list final {
     };
 
     private:
+    friend class iterator;
+    friend class const_iterator;
+
     [[nodiscard]] const_iterator end_implementation ( long long end_passes_ ) const noexcept {
         return const_iterator{ reinterpret_cast<const_node_ptr> ( &end_link ), reinterpret_cast<const_node_ptr> ( &end_link ),
                                std::forward<long long> ( end_passes_ ) };
