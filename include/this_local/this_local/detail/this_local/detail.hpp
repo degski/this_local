@@ -186,15 +186,12 @@ inline bool const BIG_ENDIAN    = is_big_endian ( );
 }
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m192 ( void const * const a_, void const * const b_ ) noexcept {
-    return equal_m128 ( a_, b_ ) ? equal_m64 ( ( __m64 const * ) a_ + 2, ( __m64 const * ) b_ + 2 ) : false;
+    return equal_m64 ( ( __m64 const * ) a_ + 2, ( __m64 const * ) b_ + 2 ) ? equal_m128 ( a_, b_ ) : false;
 }
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m256 ( void const * const a_, void const * const b_ ) noexcept {
     return not _mm256_movemask_pd (
         _mm256_cmp_pd ( _mm256_load_pd ( ( double const * ) a_ ), _mm256_load_pd ( ( double const * ) b_ ), _CMP_NEQ_UQ ) );
-}
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m384 ( void const * const a_, void const * const b_ ) noexcept {
-    return equal_m256 ( a_, b_ ) ? equal_m128 ( ( __m128 const * ) a_ + 2, ( __m128 const * ) b_ + 2 ) : false;
 }
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m64 ( void const * const a_, void const * const b_ ) noexcept {
@@ -208,9 +205,6 @@ inline bool const BIG_ENDIAN    = is_big_endian ( );
 }
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m256 ( void const * const a_, void const * const b_ ) noexcept {
     return not equal_m256 ( a_, b_ );
-}
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m384 ( void const * const a_, void const * const b_ ) noexcept {
-    return not equal_m384 ( a_, b_ );
 }
 
 union alignas ( 8 ) _m64 {
