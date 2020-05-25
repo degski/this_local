@@ -656,10 +656,11 @@ class unbounded_circular_list final {
         l_ = end_node.link_exchange.load ( std::memory_order_relaxed );
         return l_.get_aba_id ( );
     }
-    HEDLEY_ALWAYS_INLINE void store_link_exchange ( link_type l_, aba_type aba_id_ = 0 ) noexcept {
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE link_type store_link_exchange ( link_type l_, aba_type aba_id_ = 0 ) noexcept {
         if ( aba_id_ )
             l_.set_aba_id ( aba_id_ );
-        end_node.link_exchange.store ( { std::forward<link_type> ( l_ ) }, std::memory_order_relaxed );
+        end_node.link_exchange.store ( l_, std::memory_order_relaxed );
+        return std::forward<link_type> ( l_ );
     }
 
     HEDLEY_ALWAYS_INLINE void make_links_implementation ( node_type_ptr node_a_, node_type_ptr node_b_,
@@ -682,10 +683,10 @@ class unbounded_circular_list final {
         node_type_ptr new_node = &*it_;
         link_pointer_type old;
         aba_type const new_aba_id = load_link_exchange ( old ) + 1;
-        make_links<Order> ( old_node_, new_node );
+        make_links<Order> ( old_node_, new_node, new_aba_id );
         while ( not compare_and_swap_m128 ( &old.link, get_link_exchange ( ).link, &new_node->counted.link ) ) {
             load_link_exchange ( old );
-            make_links<Order> ( old_node_, new_node );
+            make_links<Order> ( old_node_, new_node, new_aba_id );
         }
         new_node->next->prev = new_node;
         return std::forward<storage_iterator &&> ( it_ );
@@ -781,49 +782,45 @@ class unbounded_circular_list final {
         p_ = end_node.pointer_exchange.load ( std::memory_order_relaxed );
         return p_.get_aba_id ( );
     }
-    HEDLEY_ALWAYS_INLINE void store_pointer_exchange ( pointer_type p_, aba_type aba_id_ = 0 ) noexcept {
+    HEDLEY_ALWAYS_INLINE pointer_type store_pointer_exchange ( pointer_type p_, aba_type aba_id_ = 0 ) noexcept {
         if ( aba_id_ )
             p_.set_aba_id ( aba_id_ );
-        end_node.pointer_exchange.store ( { std::forward<pointer_type> ( p_ ) }, std::memory_order_relaxed );
+        end_node.pointer_exchange.store ( p_, std::memory_order_relaxed );
+        return std::forward<pointer_type> ( p_ );
     }
 
-    public:
-    void pop ( ) noexcept {
-        pointer_type volatile old_end_link = load_pointer_exchange ( );
+    void delete_implementation ( node_type_ptr old_node_ ) noexcept {
+        pointer_type volatile old_pointer = store_pointer_exchange ( { old_node_, 1 } );
         for ( ever ) {
             // increase external count
-            pointer_type new_counter;
+            pointer_type new_pointer;
             do {
-                new_counter = old_end_link;
-                new_counter.external_count += 1;
-            } while ( not compare_and_swap_m128 ( &old_end_link.link, sentinel.load ( std::memory_order_relaxed ), &new_counter ) );
-            old_sentinel.external_count = new_counter.external_count;
+                new_pointer = old_pointer;
+                new_pointer.external_count += 1;
+            } while ( not compare_and_swap_m128 ( &old_pointer, get_pointer_exchange ( ), &new_pointer ) );
+            old_pointer.external_count = new_pointer.external_count;
             // we're poppin', go get the box
-            if ( node_type_ptr node = old_sentinel.node; node ) {
-                if ( not compare_and_swap_m128 ( &old_end_link.link, sentinel.load ( std::memory_order_relaxed ), &node->next ) ) {
-                    counter_type count_increase = old_sentinel.external_count - 2;
-                    if ( node->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
-                        delete_order_relaxed ( node );
-                    return;
-                }
-                else {
-                    if ( node->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 )
-                        delete_order_acquire ( node );
-                }
+            if ( not compare_and_swap_m128 ( &old_pointer, get_pointer_exchange ( ), &old_node_->link.next ) ) {
+                counter_type count_increase = old_pointer.external_count - 2;
+                if ( old_node_->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
+                    delete_order_relaxed ( old_node_ );
+                return;
             }
             else {
-                return;
+                if ( old_node_->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 )
+                    delete_order_acquire ( old_node_ );
             }
         }
     }
 
+    public:
     // Atomically returns the new end link.
     link_type reverse ( ) noexcept {
-        pointer_type old_end_link = load_pointer_exchange ( ), new_end_link;
+        pointer_type old_end_link = load_link_exchange ( ), new_end_link;
         do {
             new_end_link = { old_end_link.next, old_end_link.prev };
-        } while ( not compare_and_swap_m128 ( &old_end_link, load_pointer_exchange ( ), &new_end_link ) );
-        return load_pointer_exchange ( ).link;
+        } while ( not compare_and_swap_m128 ( &old_end_link, load_link_exchange ( ), &new_end_link ) );
+        return load_link_exchange ( ).link;
     }
 
 #include "iterators.inl"
@@ -855,7 +852,7 @@ class unbounded_circular_list final {
     operator<< ( Stream & out_, unbounded_circular_list const & list_ ) noexcept {
         return list_.ostream ( out_ );
     }
-};
+}; // namespace lockless
 
 } // namespace lockless
 
@@ -936,3 +933,38 @@ class lock_free_stack {
         }
     }
 };
+
+/* Given a reference (pointer to pointer) to the head of a list
+   and a position, deletes the node at the given position */
+void deleteNode ( struct Node ** head_ref, int position ) {
+    // If linked list is empty
+    if ( *head_ref == NULL )
+        return;
+
+    // Store head node
+    struct Node * temp = *head_ref;
+
+    // If head needs to be removed
+    if ( position == 0 ) {
+        *head_ref = temp->next; // Change head
+        free ( temp );          // free old head
+        return;
+    }
+
+    // Find previous node of the node to be deleted
+    for ( int i = 0; temp != NULL && i < position - 1; i++ )
+        temp = temp->next;
+
+    // If position is more than number of ndoes
+    if ( temp == NULL || temp->next == NULL )
+        return;
+
+    // Node temp->next is the node to be deleted
+    // Store pointer to the next of node to be deleted
+    struct Node * next = temp->next->next;
+
+    // Unlink the node from linked list
+    free ( temp->next ); // Free memory
+
+    temp->next = next; // Unlink the deleted node from list
+}
