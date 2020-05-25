@@ -376,7 +376,7 @@ namespace lockless {
 // other words, wait a little before retrying the CAS.
 
 template<typename MutexType>
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool soft_dwcas ( _m128 * dest_, _m128 ex_new_, _m128 * cr_old_ ) noexcept {
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool soft_compare_and_swap_m128 ( _m128 * dest_, _m128 ex_new_, _m128 * cr_old_ ) noexcept {
     alignas ( 64 ) static MutexType cas_mutex;
     std::scoped_lock lock ( cas_mutex );
     bool check = not equal_m128 ( dest_, cr_old_ );
@@ -387,7 +387,8 @@ template<typename MutexType>
     return true;
 }
 
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas_implementation ( _m128 volatile * dest_, _m128 ex_new_, _m128 * cr_old_ ) noexcept {
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool compare_and_swap_m128_implementation ( _m128 volatile * dest_, _m128 ex_new_,
+                                                                               _m128 * cr_old_ ) noexcept {
 #if ( defined( __clang__ ) or defined( __GNUC__ ) )
     bool value;
     __asm__ __volatile__( "lock cmpxchg16b %1\n\t"
@@ -404,9 +405,9 @@ template<typename MutexType>
 }
 
 template<typename T>
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( T volatile * dest_, T && ex_new_, T * cr_old_ ) noexcept {
-    return dwcas_implementation ( ( _m128 volatile * ) std::forward<T volatile *> ( dest_ ), _m128{ std::forward<T> ( ex_new_ ) },
-                                  ( _m128 * ) std::forward<T *> ( cr_old_ ) );
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool compare_and_swap_m128 ( T volatile * dest_, T && ex_new_, T * cr_old_ ) noexcept {
+    return compare_and_swap_m128_implementation ( ( _m128 volatile * ) std::forward<T volatile *> ( dest_ ),
+                                                  _m128{ std::forward<T> ( ex_new_ ) }, ( _m128 * ) std::forward<T *> ( cr_old_ ) );
 }
 
 HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
@@ -503,12 +504,11 @@ struct slim_rw_lock final {
 
 alignas ( 64 ) inline static lockless::spin_rw_lock<long long> ostream_mutex;
 
-struct before_insertion {};
-struct after_insertion {};
+struct insert_before {};
+struct insert_after {};
 
 namespace lockless {
-template<typename ValueType, template<typename> typename Allocator = std::allocator,
-         typename DefaultInsertionMode = after_insertion>
+template<typename ValueType, template<typename> typename Allocator = std::allocator, typename DefaultInsertionMode = insert_after>
 class unbounded_circular_list final {
 
     public:
@@ -517,8 +517,8 @@ class unbounded_circular_list final {
     using allocator_type         = Allocator<Type>;
     using default_insertion_mode = DefaultInsertionMode;
 
-    struct before_insertion {};
-    struct after_insertion {};
+    struct insert_before {};
+    struct insert_after {};
 
     using pointer       = ValueType *;
     using const_pointer = ValueType const *;
@@ -648,8 +648,8 @@ class unbounded_circular_list final {
 
     public:
     unbounded_circular_list ( ) :
-        insert_before_implementation{ &unbounded_circular_list::insert_initial_implementation<before_insertion> },
-        insert_after_implementation{ &unbounded_circular_list::insert_initial_implementation<after_insertion> } {}
+        insert_before_implementation{ &unbounded_circular_list::insert_initial_implementation<insert_before> },
+        insert_after_implementation{ &unbounded_circular_list::insert_initial_implementation<insert_after> } {}
 
     unbounded_circular_list ( value_type const & data_ ) {
         insert_initial_implementation<DefaultInsertionMode> ( nodes.emplace ( data_ ) );
@@ -682,45 +682,43 @@ class unbounded_circular_list final {
         store_exchange_link ( { node_a_->counted.link.prev, &node_b_->counted.link, 1 }, aba_id_ );
     }
 
-    template<typename At>
+    template<typename Order>
     HEDLEY_ALWAYS_INLINE void make_links ( node_type_ptr node_a_, node_type_ptr node_b_, unsigned char aba_id_ ) noexcept {
-        if constexpr ( std::is_same<At, before_insertion>::value )
-            make_links_implementation ( std::forward<node_type_ptr> ( node_b_ ), std::forward<node_type_ptr> ( node_a_ ),
-                                        std::forward<unsigned char> ( aba_id_ ) );
+        if constexpr ( std::is_same<Order, insert_before>::value )
+            make_links_implementation ( node_b_, node_a_, aba_id_ );
         else
-            make_links_implementation ( std::forward<node_type_ptr> ( node_a_ ), std::forward<node_type_ptr> ( node_b_ ),
-                                        std::forward<unsigned char> ( aba_id_ ) );
+            make_links_implementation ( node_a_, node_b_, aba_id_ );
     }
 
-    template<typename At>
+    template<typename Order>
     [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_regular_implementation ( node_type_ptr old_node_,
                                                                                           storage_iterator && it_ ) noexcept {
         node_type_ptr new_node = &*it_;
         counted_link_type old;
         unsigned char const new_aba_id = load_exchange_link ( old ) + 1;
-        make_links<At> ( old_node_, new_node );
-        while ( not dwcas ( &old.link, get_exchange_link ( ).link, &new_node->counted.link ) ) {
+        make_links<Order> ( old_node_, new_node );
+        while ( not compare_and_swap_m128 ( &old.link, get_exchange_link ( ).link, &new_node->counted.link ) ) {
             load_exchange_link ( old );
-            make_links<At> ( old_node_, new_node );
+            make_links<Order> ( old_node_, new_node );
         }
         new_node->next->prev = new_node;
         return std::forward<storage_iterator &&> ( it_ );
     }
 
-    template<typename At>
+    template<typename Order>
     [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_initial_implementation ( node_type_ptr old_node_,
                                                                                           storage_iterator && it_ ) noexcept {
         std::scoped_lock lock ( instance_mutex );
         node_type_ptr new_node           = &*it_;
         *( ( counted_link * ) new_node ) = counted_link{ link{ &end_link, &end_link }, 1 };
         end_link                         = link{ ( link * ) new_node, ( link * ) new_node };
-        if constexpr ( std::is_same<At, before_insertion>::value ) {
+        if constexpr ( std::is_same<Order, insert_before>::value ) {
             store_sentinel ( ( node_type_ptr ) &end_link, counted_link{ link{ &end_link, &end_link }, 1 } );
-            insert_before_implementation = &unbounded_circular_list::insert_regular_implementation<before_insertion>;
+            insert_before_implementation = &unbounded_circular_list::insert_regular_implementation<insert_before>;
         }
         else {
             store_sentinel ( new_node, counted_link{ link{ &end_link, &end_link }, 1 } );
-            insert_after_implementation = &unbounded_circular_list::insert_regular_implementation<after_insertion>;
+            insert_after_implementation = &unbounded_circular_list::insert_regular_implementation<insert_after>;
         }
         return std::forward<storage_iterator> ( it_ );
     }
@@ -738,20 +736,20 @@ class unbounded_circular_list final {
     }
 
     [[maybe_unused]] storage_iterator push ( value_type const & data_ ) {
-        if constexpr ( std::is_same<DefaultInsertionMode, before_insertion>::value )
+        if constexpr ( std::is_same<DefaultInsertionMode, insert_before>::value )
             return push_front ( data_ );
         else
             return push_back ( data_ );
     }
     [[maybe_unused]] storage_iterator push ( value_type && data_ ) {
-        if constexpr ( std::is_same<DefaultInsertionMode, before_insertion>::value )
+        if constexpr ( std::is_same<DefaultInsertionMode, insert_before>::value )
             return push_front ( std::forward<value_type> ( data_ ) );
         else
             return push_back ( std::forward<value_type> ( data_ ) );
     }
     template<typename... Args>
     [[maybe_unused]] storage_iterator emplace ( Args &&... args_ ) {
-        if constexpr ( std::is_same<DefaultInsertionMode, before_insertion>::value )
+        if constexpr ( std::is_same<DefaultInsertionMode, insert_before>::value )
             return push_front ( std::forward<Args> ( args_ )... );
         else
             return emplace_back ( std::forward<Args> ( args_ )... );
@@ -793,11 +791,11 @@ class unbounded_circular_list final {
             do {
                 new_counter = *( ( counted_link * ) &old_sentinel );
                 new_counter.external_count += 1;
-            } while ( not dwcas ( &old_sentinel, sentinel.load ( std::memory_order_relaxed ), &new_counter ) );
+            } while ( not compare_and_swap_m128 ( &old_sentinel, sentinel.load ( std::memory_order_relaxed ), &new_counter ) );
             old_sentinel.external_count = new_counter.external_count;
             // we're poppin', go get the box
             if ( node_type_ptr node = old_sentinel.node; node ) {
-                if ( not dwcas ( &old_sentinel, sentinel.load ( std::memory_order_relaxed ), &node->next ) ) {
+                if ( not compare_and_swap_m128 ( &old_sentinel, sentinel.load ( std::memory_order_relaxed ), &node->next ) ) {
                     unsigned long count_increase = old_sentinel.external_count - 2;
                     if ( node->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
                         delete_order_relaxed ( node );
@@ -1065,7 +1063,7 @@ class unbounded_circular_list final {
         counted_link_type old_end_link = load_exchange_link ( ), new_end_link;
         do {
             new_end_link = { old_end_link.next, old_end_link.prev };
-        } while ( not dwcas ( &old_end_link, load_exchange_link ( ), &new_end_link ) );
+        } while ( not compare_and_swap_m128 ( &old_end_link, load_exchange_link ( ), &new_end_link ) );
         return load_exchange_link ( ).link;
     }
 
