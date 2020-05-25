@@ -44,5 +44,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />
+    <None Include="include\this_local\this_local\detail\this_local\iterators.inl">
+      <Filter>Header Files\this_local</Filter>
+    </None>
   </ItemGroup>
 </Project>

@@ -226,6 +226,7 @@
     <ClInclude Include="include\this_local\this_local\plf_stack.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="include\this_local\this_local\detail\this_local\iterators.inl" />
     <None Include="README.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
