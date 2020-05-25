@@ -184,30 +184,17 @@ inline constexpr int lo_index ( ) noexcept {
     return a == b;
 }
 
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m128 ( void const * const a_, void const * const b_ ) noexcept {
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool is_equal_m128 ( void const * const a_, void const * const b_ ) noexcept {
     return not _mm_movemask_pd ( _mm_cmpneq_pd ( _mm_load_pd ( ( double const * ) a_ ), _mm_load_pd ( ( double const * ) b_ ) ) );
 }
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m192 ( void const * const a_, void const * const b_ ) noexcept {
-    return equal_m64 ( ( __m64 const * ) a_ + 2, ( __m64 const * ) b_ + 2 ) ? equal_m128 ( a_, b_ ) : false;
+    return equal_m64 ( ( __m64 const * ) a_ + 2, ( __m64 const * ) b_ + 2 ) ? is_equal_m128 ( a_, b_ ) : false;
 }
 
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool equal_m256 ( void const * const a_, void const * const b_ ) noexcept {
     return not _mm256_movemask_pd (
         _mm256_cmp_pd ( _mm256_load_pd ( ( double const * ) a_ ), _mm256_load_pd ( ( double const * ) b_ ), _CMP_NEQ_UQ ) );
-}
-
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m64 ( void const * const a_, void const * const b_ ) noexcept {
-    return not equal_m64 ( a_, b_ );
-}
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m128 ( void const * const a_, void const * const b_ ) noexcept {
-    return not equal_m128 ( a_, b_ );
-}
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m192 ( void const * const a_, void const * const b_ ) noexcept {
-    return not equal_m192 ( a_, b_ );
-}
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool unequal_m256 ( void const * const a_, void const * const b_ ) noexcept {
-    return not equal_m256 ( a_, b_ );
 }
 
 union _m64 {
@@ -295,7 +282,7 @@ union _m128 {
 
     template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m128 )>>
     [[nodiscard]] bool operator== ( ValueType const & r_ ) const noexcept {
-        return equal_m128 ( this, &r_ );
+        return is_equal_m128 ( this, &r_ );
     }
     template<typename ValueType, typename = std::enable_if_t<sizeof ( ValueType ) >= sizeof ( __m128 )>>
     [[nodiscard]] bool operator!= ( ValueType const & r_ ) const noexcept {
@@ -379,7 +366,7 @@ template<typename MutexType>
 [[nodiscard]] HEDLEY_ALWAYS_INLINE bool soft_compare_and_swap_m128 ( _m128 * dest_, _m128 ex_new_, _m128 * cr_old_ ) noexcept {
     alignas ( 64 ) static MutexType cas_mutex;
     std::scoped_lock lock ( cas_mutex );
-    bool check = not equal_m128 ( dest_, cr_old_ );
+    bool check = not is_equal_m128 ( dest_, cr_old_ );
     std::memcpy ( cr_old_, dest_, 16 );
     if ( check )
         return false;
@@ -533,8 +520,8 @@ class unbounded_circular_list final {
     struct link_type {
         alignas ( 16 ) link_pointer_type prev = nullptr, *next = nullptr;
 
-        [[nodiscard]] bool operator== ( link_type const & r_ ) const noexcept { return equal_m128 ( this, &r_ ); }
-        [[nodiscard]] bool operator!= ( link_type const & r_ ) const noexcept { return unequal_m128 ( this, &r_ ); }
+        [[nodiscard]] bool operator== ( link_type const & r_ ) const noexcept { return is_equal_m128 ( this, &r_ ); }
+        [[nodiscard]] bool operator!= ( link_type const & r_ ) const noexcept { return not operator== ( this, &r_ ); }
 
         template<typename Stream>
         [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> operator<< ( Stream & out_,
@@ -550,11 +537,22 @@ class unbounded_circular_list final {
     using counter_type = unsigned long long;
 
     struct alignas ( 16 ) counted_pointer_type {
-        link_pointer_type value;
-        counter_type external_count = 0; // williams reversed
+        // williams reversed
+        link_pointer_type value     = nullptr;
+        counter_type external_count = 0;
 
-        [[nodiscard]] bool operator== ( counted_pointer_type const & r_ ) const noexcept { return equal_m128 ( this, &r_ ); }
-        [[nodiscard]] bool operator!= ( counted_pointer_type const & r_ ) const noexcept { return unequal_m128 ( this, &r_ ); }
+        [[nodiscard]] bool operator== ( counted_pointer_type const & r_ ) const noexcept { return is_equal_m128 ( this, &r_ ); }
+        [[nodiscard]] bool operator!= ( counted_pointer_type const & r_ ) const noexcept { return not operator== ( this, &r_ ); }
+
+        template<typename Stream>
+        [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &>
+        operator<< ( Stream & out_, counted_pointer_type const & pointer_ ) noexcept {
+            auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
+            if constexpr ( SAX_SYNCED_OSTREAMS )
+                std::scoped_lock lock ( ostream_mutex );
+            out_ << "<p " << a ( pointer_.value ) << '.' << pointer_.external_count << '>';
+            return out_;
+        }
     };
 
     struct link_pointer_type {
