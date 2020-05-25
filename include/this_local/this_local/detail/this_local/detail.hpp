@@ -513,12 +513,8 @@ class unbounded_circular_list final {
     using reference       = ValueType &;
     using const_reference = ValueType const &;
 
-    struct link_type;
-    using link_pointer_type       = link_type *;
-    using const_link_pointer_type = link_type const *;
-
     struct link_type {
-        alignas ( 16 ) link_pointer_type prev = nullptr, *next = nullptr;
+        alignas ( 16 ) link_type * prev = nullptr, *next = nullptr;
 
         [[nodiscard]] bool operator== ( link_type const & r_ ) const noexcept { return is_equal_m128 ( this, &r_ ); }
         [[nodiscard]] bool operator!= ( link_type const & r_ ) const noexcept { return not operator== ( this, &r_ ); }
@@ -536,17 +532,17 @@ class unbounded_circular_list final {
 
     using counter_type = unsigned long long;
 
-    struct alignas ( 16 ) counted_pointer_type {
+    struct alignas ( 16 ) pointer_type {
         // williams reversed
-        link_pointer_type value     = nullptr;
+        link_type * value           = nullptr;
         counter_type external_count = 0;
 
-        [[nodiscard]] bool operator== ( counted_pointer_type const & r_ ) const noexcept { return is_equal_m128 ( this, &r_ ); }
-        [[nodiscard]] bool operator!= ( counted_pointer_type const & r_ ) const noexcept { return not operator== ( this, &r_ ); }
+        [[nodiscard]] bool operator== ( pointer_type const & r_ ) const noexcept { return is_equal_m128 ( this, &r_ ); }
+        [[nodiscard]] bool operator!= ( pointer_type const & r_ ) const noexcept { return not operator== ( this, &r_ ); }
 
         template<typename Stream>
         [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &>
-        operator<< ( Stream & out_, counted_pointer_type const & pointer_ ) noexcept {
+        operator<< ( Stream & out_, pointer_type const & pointer_ ) noexcept {
             auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
             if constexpr ( SAX_SYNCED_OSTREAMS )
                 std::scoped_lock lock ( ostream_mutex );
@@ -557,7 +553,7 @@ class unbounded_circular_list final {
 
     struct link_pointer_type {
         link_type link;
-        counted_pointer_type pointer;
+        pointer_type pointer;
 
         void set_aba_id ( unsigned char aba_id_ ) noexcept {
             std::memcpy ( reinterpret_cast<unsigned char *> ( &link.prev ) + hi_index<void *> ( ), &aba_id_, 1 );
@@ -582,49 +578,19 @@ class unbounded_circular_list final {
     struct end_node_type final {
         link_pointer_type counted;
         std::atomic<counter_type> internal_count = { 0 };
-        std::atomic<link_type> link_exchange;
-        std::atomic<counted_pointer_type> counted_pointer_exchange;
 
-        template<typename Stream>
-        [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &>
-        operator<< ( Stream & out_, end_node_type const * node_ ) noexcept {
-            auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            if constexpr ( SAX_SYNCED_OSTREAMS )
-                std::scoped_lock lock ( ostream_mutex );
-            out_ << "<n " << a ( node_ ) << ' ' << a ( node_->counted.link.prev ) << ' ' << a ( node_->counted.link.next ) << '.'
-                 << node_->internal_count << '-' << node_->counted.link.external_count << '>';
-            return out_;
-        }
-        template<typename Stream>
-        [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &>
-        operator<< ( Stream & out_, end_node_type const & node_ ) noexcept {
-            return operator<< ( out_, &node_ );
-        }
+        std::atomic<link_type> link_exchange;
+        std::atomic<pointer_type> pointer_exchange;
     };
 
     struct node_type final {
         link_pointer_type counted;
         std::atomic<counter_type> internal_count = { 0 };
+
         value_type data;
 
         template<typename... Args>
         node_type ( Args &&... args_ ) : data{ std::forward<Args> ( args_ )... } {}
-
-        template<typename Stream>
-        [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> operator<< ( Stream & out_,
-                                                                                             node_type const * node_ ) noexcept {
-            auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            if constexpr ( SAX_SYNCED_OSTREAMS )
-                std::scoped_lock lock ( ostream_mutex );
-            out_ << "<n " << a ( node_ ) << ' ' << a ( node_->counted.link.prev ) << ' ' << a ( node_->counted.link.next ) << '.'
-                 << node_->internal_count << '-' << node_->counted.link.external_count << '>';
-            return out_;
-        }
-        template<typename Stream>
-        [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> operator<< ( Stream & out_,
-                                                                                             node_type const & node_ ) noexcept {
-            return operator<< ( out_, &node_ );
-        }
     };
 
     using node_type_ptr       = node_type *;
