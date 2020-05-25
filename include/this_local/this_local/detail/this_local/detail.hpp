@@ -781,7 +781,7 @@ class unbounded_circular_list final {
         friend class iterator;
 
         alignas ( 16 ) node_ptr node, end_node;
-        long long skip_end; // will throw on (negative-) overflow, not handled
+        long long skip_end = 0; // will throw on (negative-) overflow, not handled
 
         concurrent_iterator ( node_ptr node_, node_ptr end_node_, long long end_passes_ ) noexcept :
             node{ std::forward<node_ptr> ( node_ ) }, end_node{ std::forward<node_ptr> ( end_node_ ) }, skip_end{
@@ -825,7 +825,7 @@ class unbounded_circular_list final {
         friend class const_iterator;
 
         alignas ( 16 ) const_node_ptr node, end_node;
-        long long skip_end; // will throw on (negative-) overflow, not handled
+        long long skip_end = 0; // will throw on (negative-) overflow, not handled
 
         const_concurrent_iterator ( const_node_ptr node_, const_node_ptr end_node_, long long end_passes_ ) noexcept :
             node{ std::forward<const_node_ptr> ( node_ ) }, end_node{ std::forward<const_node_ptr> ( end_node_ ) }, skip_end{
