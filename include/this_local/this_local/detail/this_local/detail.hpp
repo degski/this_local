@@ -552,6 +552,9 @@ class unbounded_circular_list final {
     struct alignas ( 16 ) counted_pointer_type {
         link_pointer_type value;
         counter_type external_count = 0; // williams reversed
+
+        [[nodiscard]] bool operator== ( counted_pointer_type const & r_ ) const noexcept { return equal_m128 ( this, &r_ ); }
+        [[nodiscard]] bool operator!= ( counted_pointer_type const & r_ ) const noexcept { return unequal_m128 ( this, &r_ ); }
     };
 
     struct link_pointer_type {
