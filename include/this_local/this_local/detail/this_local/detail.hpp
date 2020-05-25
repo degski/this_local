@@ -432,7 +432,7 @@ struct spin_rw_lock final { // test-test-and-set
         } while ( not try_lock ( ) );
     }
     [[nodiscard]] HEDLEY_ALWAYS_INLINE bool try_lock ( ) noexcept {
-        return unlocked == flag.link_type_exchange ( locked_writer, std::memory_order_acquire );
+        return unlocked == flag.link_exchange ( locked_writer, std::memory_order_acquire );
     }
     HEDLEY_ALWAYS_INLINE void unlock ( ) noexcept { flag.store ( unlocked, std::memory_order_release ); }
 
@@ -444,7 +444,7 @@ struct spin_rw_lock final { // test-test-and-set
     }
     [[nodiscard]] HEDLEY_ALWAYS_INLINE bool try_lock ( ) const noexcept {
         return unlocked_locked_reader_mask &
-               const_cast<std::atomic<int> *> ( &flag )->link_type_exchange ( locked_reader, std::memory_order_acquire );
+               const_cast<std::atomic<int> *> ( &flag )->link_exchange ( locked_reader, std::memory_order_acquire );
     }
     HEDLEY_ALWAYS_INLINE void unlock ( ) const noexcept {
         const_cast<std::atomic<FlagType> *> ( &flag )->store ( unlocked, std::memory_order_release );
@@ -564,8 +564,8 @@ class unbounded_circular_list final {
         }
         // clears the current id
         unsigned char get_aba_id ( ) noexcept {
-            return std::link_type_exchange ( reinterpret_cast<unsigned char *> ( &link.prev ) + hi_index<void *> ( ),
-                                             ( unsigned char ) 0 );
+            return std::link_exchange ( reinterpret_cast<unsigned char *> ( &link.prev ) + hi_index<void *> ( ),
+                                        ( unsigned char ) 0 );
         }
 
         template<typename Stream>
@@ -582,7 +582,7 @@ class unbounded_circular_list final {
     struct end_node_type final {
         link_pointer_type counted;
         std::atomic<counter_type> internal_count = { 0 };
-        std::atomic<link_type> link_type_exchange;
+        std::atomic<link_type> link_exchange;
         std::atomic<counted_pointer_type> counted_pointer_exchange;
 
         template<typename Stream>
@@ -675,16 +675,16 @@ class unbounded_circular_list final {
 
     private:
     [[nodiscard]] HEDLEY_ALWAYS_INLINE link_pointer_type get_exchange_link ( ) const noexcept {
-        return end_node.link_type_exchange.load ( std::memory_order_relaxed );
+        return end_node.link_exchange.load ( std::memory_order_relaxed );
     }
     [[maybe_unused]] HEDLEY_ALWAYS_INLINE unsigned char load_exchange_link ( link_pointer_type & l_ ) const noexcept {
-        l_ = end_node.link_type_exchange.load ( std::memory_order_relaxed );
+        l_ = end_node.link_exchange.load ( std::memory_order_relaxed );
         return l_.get_aba_id ( );
     }
     HEDLEY_ALWAYS_INLINE void store_exchange_link ( link_pointer_type l_, unsigned char aba_id_ = 0 ) noexcept {
         if ( aba_id_ )
             l_.set_aba_id ( aba_id_ );
-        end_node.link_type_exchange.store ( { std::forward<link_pointer_type> ( l_ ) }, std::memory_order_relaxed );
+        end_node.link_exchange.store ( { std::forward<link_pointer_type> ( l_ ) }, std::memory_order_relaxed );
     }
 
     HEDLEY_ALWAYS_INLINE void make_links_implementation ( node_type_ptr node_a_, node_type_ptr node_b_,
