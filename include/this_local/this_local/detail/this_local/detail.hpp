@@ -403,10 +403,10 @@ template<typename MutexType>
 #endif
 }
 
-template<typename T1, typename T2, typename T3>
-[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( T1 volatile * dest_, T2 && ex_new_, T3 * cr_old_ ) noexcept {
-    return dwcas_implementation ( ( _m128 volatile * ) std::forward<T1 volatile *> ( dest_ ), _m128{ std::forward<T2> ( ex_new_ ) },
-                                  ( _m128 * ) std::forward<T3 *> ( cr_old_ ) );
+template<typename T>
+[[nodiscard]] HEDLEY_ALWAYS_INLINE bool dwcas ( T volatile * dest_, T && ex_new_, T * cr_old_ ) noexcept {
+    return dwcas_implementation ( ( _m128 volatile * ) std::forward<T volatile *> ( dest_ ), _m128{ std::forward<T> ( ex_new_ ) },
+                                  ( _m128 * ) std::forward<T *> ( cr_old_ ) );
 }
 
 HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
@@ -569,8 +569,9 @@ class unbounded_circular_list final {
     using const_counted_link_type_ptr = counted_link_type const *;
 
     struct end_node_type final {
-        std::atomic<counted_link_type> counted;
+        counted_link_type counted;
         std::atomic<unsigned long> internal_count = { 0 };
+        std::atomic<counted_link_type> exchange;
 
         template<typename Stream>
         [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &>
@@ -592,6 +593,7 @@ class unbounded_circular_list final {
     struct node_type final {
         counted_link_type counted;
         std::atomic<unsigned long> internal_count = { 0 };
+        value_type data;
 
         template<typename... Args>
         node_type ( Args &&... args_ ) : data{ std::forward<Args> ( args_ )... } {}
@@ -611,8 +613,6 @@ class unbounded_circular_list final {
                                                                                              node_type const & node_ ) noexcept {
             return operator<< ( out_, &node_ );
         }
-
-        value_type data;
     };
 
     using node_type_ptr       = node_type *;
@@ -662,40 +662,39 @@ class unbounded_circular_list final {
     }
 
     private:
-    [[nodiscard]] HEDLEY_ALWAYS_INLINE counted_link_type load_end_link ( ) const noexcept {
+    [[nodiscard]] HEDLEY_ALWAYS_INLINE counted_link_type load_exchange_link ( ) const noexcept {
         return end_node.link.load ( std::memory_order_relaxed );
     }
 
-    [[nodiscard]] HEDLEY_ALWAYS_INLINE unsigned char load_end_link ( counted_link_type & l_ ) const noexcept {
-        l_ = end_node.link.load ( std::memory_order_relaxed );
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE unsigned char load_exchange_link ( counted_link_type & l_ ) const noexcept {
+        l_ = end_node.exchange.link.load ( std::memory_order_relaxed );
         return l_.get_aba_id ( );
     }
-
-    HEDLEY_ALWAYS_INLINE void store_end_link ( counted_link_type l_, unsigned char aba_id_ = 0 ) noexcept {
-        l_.set_aba_id ( aba_id_ );
-        end_node.store ( { std::forward<counted_link_type> ( l_ ) }, std::memory_order_relaxed );
+    [[nodiscard]] HEDLEY_ALWAYS_INLINE counted_link_type get_exchange_link ( ) const noexcept {
+        return end_node.exchange.link.load ( std::memory_order_relaxed );
+    }
+    HEDLEY_ALWAYS_INLINE void store_exchange_link ( counted_link_type l_, unsigned char aba_id_ = 0 ) noexcept {
+        if ( aba_id_ )
+            l_.set_aba_id ( aba_id_ );
+        end_node.exchange.store ( { std::forward<counted_link_type> ( l_ ) }, std::memory_order_relaxed );
     }
 
     template<typename At>
-    [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_regular_implementation ( storage_iterator && it_ ) noexcept {
+    [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_regular_implementation ( node_type_ptr old_node,
+                                                                                          storage_iterator && it_ ) noexcept {
         node_type_ptr new_node = &*it_;
-        // the body of the cas loop un-rolled once (same as below)
-        counted_sentinel old             = sentinel.load ( std::memory_order_relaxed );
-        unsigned char new_aba_id         = std::exchange ( *( ( ( char * ) &old.node ) + hi_index<node_type_ptr> ( ) ), 0 ) + 1;
-        *( ( counted_link * ) new_node ) = counted_link{ link{ ( link * ) old.node, old.node->next }, 1 };
-        if constexpr ( std::is_same<front_insertion, At>::value )
-            store_sentinel ( old.node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
-        else
-            store_sentinel ( new_node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
-        // end of un-rolled loop
-        while ( not dwcas ( old.node, sentinel.load ( std::memory_order_relaxed ), new_node ) ) {
-            old = sentinel.load ( std::memory_order_relaxed );
-            std::memset ( ( ( ( char * ) &old.node ) + hi_index<node_type_ptr> ( ) ), 0, 1 );
-            *( ( counted_link * ) new_node ) = counted_link{ link{ ( link * ) old.node, old.node->next }, 1 };
-            if constexpr ( std::is_same<front_insertion, At>::value )
-                store_sentinel ( old.node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
-            else
-                store_sentinel ( new_node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
+        counted_link_type old;
+        unsigned char const new_aba_id = load_exchange_link ( old ) + 1;
+
+        *( ( counted_link_type * ) new_node ) = counted_link_type{ link_type{ ( link_type * ) old_node, old_node->next }, 1 };
+        store_exchange_link ( counted_link_type{ link_type{ old_node->prev, ( link_type * ) new_node }, 1 }, new_aba_id );
+
+        while ( not dwcas ( &old.link, get_exchange_link ( ).link, &new_node->counted.link ) ) {
+
+            load_exchange_link ( old );
+
+            *( ( counted_link_type * ) new_node ) = counted_link_type{ link_type{ ( link_type * ) old_node, old_node->next }, 1 };
+            store_exchange_link ( counted_link_type{ link_type{ old_node->prev, ( link_type * ) new_node }, 1 }, new_aba_id );
         }
         new_node->next->prev = new_node;
         return std::forward<storage_iterator &&> ( it_ );
@@ -1055,11 +1054,11 @@ class unbounded_circular_list final {
 
     // Atomically returns the new end link.
     link_type reverse ( ) noexcept {
-        counted_link_type old_end_link = load_end_link ( ), new_end_link;
+        counted_link_type old_end_link = load_exchange_link ( ), new_end_link;
         do {
             new_end_link = { old_end_link.next, old_end_link.prev };
-        } while ( not dwcas ( &old_end_link, load_end_link ( ), &new_end_link ) );
-        return load_end_link ( ).link;
+        } while ( not dwcas ( &old_end_link, load_exchange_link ( ), &new_end_link ) );
+        return load_exchange_link ( ).link;
     }
 
     private:
