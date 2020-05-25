@@ -503,11 +503,12 @@ struct slim_rw_lock final {
 
 alignas ( 64 ) inline static lockless::spin_rw_lock<long long> ostream_mutex;
 
-struct front_insertion {};
-struct back_insertion {};
+struct before_insertion {};
+struct after_insertion {};
 
 namespace lockless {
-template<typename ValueType, template<typename> typename Allocator = std::allocator, typename DefaultInsertionMode = back_insertion>
+template<typename ValueType, template<typename> typename Allocator = std::allocator,
+         typename DefaultInsertionMode = after_insertion>
 class unbounded_circular_list final {
 
     public:
@@ -516,8 +517,8 @@ class unbounded_circular_list final {
     using allocator_type         = Allocator<Type>;
     using default_insertion_mode = DefaultInsertionMode;
 
-    struct front_insertion {};
-    struct back_insertion {};
+    struct before_insertion {};
+    struct after_insertion {};
 
     using pointer       = ValueType *;
     using const_pointer = ValueType const *;
@@ -640,15 +641,15 @@ class unbounded_circular_list final {
     end_node_type end_node;
     storage_type nodes;
 
-    storage_iterator ( unbounded_circular_list::*insert_front_implementation ) ( storage_iterator && ) noexcept;
-    storage_iterator ( unbounded_circular_list::*insert_back_implementation ) ( storage_iterator && ) noexcept;
+    storage_iterator ( unbounded_circular_list::*insert_before_implementation ) ( node_type_ptr, storage_iterator && ) noexcept;
+    storage_iterator ( unbounded_circular_list::*insert_after_implementation ) ( node_type_ptr, storage_iterator && ) noexcept;
 
     // constructors
 
     public:
     unbounded_circular_list ( ) :
-        insert_front_implementation{ &unbounded_circular_list::insert_initial_implementation<front_insertion> },
-        insert_back_implementation{ &unbounded_circular_list::insert_initial_implementation<back_insertion> } {}
+        insert_before_implementation{ &unbounded_circular_list::insert_initial_implementation<before_insertion> },
+        insert_after_implementation{ &unbounded_circular_list::insert_initial_implementation<after_insertion> } {}
 
     unbounded_circular_list ( value_type const & data_ ) {
         insert_initial_implementation<DefaultInsertionMode> ( nodes.emplace ( data_ ) );
@@ -662,16 +663,12 @@ class unbounded_circular_list final {
     }
 
     private:
-    [[nodiscard]] HEDLEY_ALWAYS_INLINE counted_link_type load_exchange_link ( ) const noexcept {
-        return end_node.link.load ( std::memory_order_relaxed );
-    }
-
-    [[maybe_unused]] HEDLEY_ALWAYS_INLINE unsigned char load_exchange_link ( counted_link_type & l_ ) const noexcept {
-        l_ = end_node.exchange.link.load ( std::memory_order_relaxed );
-        return l_.get_aba_id ( );
-    }
     [[nodiscard]] HEDLEY_ALWAYS_INLINE counted_link_type get_exchange_link ( ) const noexcept {
-        return end_node.exchange.link.load ( std::memory_order_relaxed );
+        return end_node.exchange.load ( std::memory_order_relaxed );
+    }
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE unsigned char load_exchange_link ( counted_link_type & l_ ) const noexcept {
+        l_ = end_node.exchange.load ( std::memory_order_relaxed );
+        return l_.get_aba_id ( );
     }
     HEDLEY_ALWAYS_INLINE void store_exchange_link ( counted_link_type l_, unsigned char aba_id_ = 0 ) noexcept {
         if ( aba_id_ )
@@ -679,85 +676,96 @@ class unbounded_circular_list final {
         end_node.exchange.store ( { std::forward<counted_link_type> ( l_ ) }, std::memory_order_relaxed );
     }
 
+    HEDLEY_ALWAYS_INLINE void make_links_implementation ( node_type_ptr node_a_, node_type_ptr node_b_,
+                                                          unsigned char aba_id_ ) noexcept {
+        node_b_->counted = { &node_a_->counted.link, node_a_->counted.link.next, 1 };
+        store_exchange_link ( { node_a_->counted.link.prev, &node_b_->counted.link, 1 }, aba_id_ );
+    }
+
     template<typename At>
-    [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_regular_implementation ( node_type_ptr old_node,
+    HEDLEY_ALWAYS_INLINE void make_links ( node_type_ptr node_a_, node_type_ptr node_b_, unsigned char aba_id_ ) noexcept {
+        if constexpr ( std::is_same<At, before_insertion>::value )
+            make_links_implementation ( std::forward<node_type_ptr> ( node_b_ ), std::forward<node_type_ptr> ( node_a_ ),
+                                        std::forward<unsigned char> ( aba_id_ ) );
+        else
+            make_links_implementation ( std::forward<node_type_ptr> ( node_a_ ), std::forward<node_type_ptr> ( node_b_ ),
+                                        std::forward<unsigned char> ( aba_id_ ) );
+    }
+
+    template<typename At>
+    [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_regular_implementation ( node_type_ptr old_node_,
                                                                                           storage_iterator && it_ ) noexcept {
         node_type_ptr new_node = &*it_;
         counted_link_type old;
         unsigned char const new_aba_id = load_exchange_link ( old ) + 1;
-
-        *( ( counted_link_type * ) new_node ) = counted_link_type{ link_type{ ( link_type * ) old_node, old_node->next }, 1 };
-        store_exchange_link ( counted_link_type{ link_type{ old_node->prev, ( link_type * ) new_node }, 1 }, new_aba_id );
-
+        make_links<At> ( old_node_, new_node );
         while ( not dwcas ( &old.link, get_exchange_link ( ).link, &new_node->counted.link ) ) {
-
             load_exchange_link ( old );
-
-            *( ( counted_link_type * ) new_node ) = counted_link_type{ link_type{ ( link_type * ) old_node, old_node->next }, 1 };
-            store_exchange_link ( counted_link_type{ link_type{ old_node->prev, ( link_type * ) new_node }, 1 }, new_aba_id );
+            make_links<At> ( old_node_, new_node );
         }
         new_node->next->prev = new_node;
         return std::forward<storage_iterator &&> ( it_ );
     }
 
     template<typename At>
-    [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_initial_implementation ( storage_iterator && it_ ) noexcept {
+    [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_initial_implementation ( node_type_ptr old_node_,
+                                                                                          storage_iterator && it_ ) noexcept {
         std::scoped_lock lock ( instance_mutex );
         node_type_ptr new_node           = &*it_;
         *( ( counted_link * ) new_node ) = counted_link{ link{ &end_link, &end_link }, 1 };
         end_link                         = link{ ( link * ) new_node, ( link * ) new_node };
-        if constexpr ( std::is_same<At, front_insertion>::value ) {
+        if constexpr ( std::is_same<At, before_insertion>::value ) {
             store_sentinel ( ( node_type_ptr ) &end_link, counted_link{ link{ &end_link, &end_link }, 1 } );
-            insert_front_implementation = &unbounded_circular_list::insert_regular_implementation<front_insertion>;
+            insert_before_implementation = &unbounded_circular_list::insert_regular_implementation<before_insertion>;
         }
         else {
             store_sentinel ( new_node, counted_link{ link{ &end_link, &end_link }, 1 } );
-            insert_back_implementation = &unbounded_circular_list::insert_regular_implementation<back_insertion>;
+            insert_after_implementation = &unbounded_circular_list::insert_regular_implementation<after_insertion>;
         }
         return std::forward<storage_iterator> ( it_ );
     }
 
     public:
     [[maybe_unused]] storage_iterator push_back ( value_type const & data_ ) {
-        return ( this->*insert_back_implementation ) ( nodes.emplace ( data_ ) );
+        return ( this->*insert_after_implementation ) ( nodes.emplace ( data_ ) );
     }
     [[maybe_unused]] storage_iterator push_back ( value_type && data_ ) {
-        return ( this->*insert_back_implementation ) ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+        return ( this->*insert_after_implementation ) ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
     [[maybe_unused]] storage_iterator emplace_back ( Args &&... args_ ) {
-        return ( this->*insert_back_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+        return ( this->*insert_after_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
     [[maybe_unused]] storage_iterator push ( value_type const & data_ ) {
-        if constexpr ( std::is_same<DefaultInsertionMode, front_insertion>::value )
+        if constexpr ( std::is_same<DefaultInsertionMode, before_insertion>::value )
             return push_front ( data_ );
         else
             return push_back ( data_ );
     }
     [[maybe_unused]] storage_iterator push ( value_type && data_ ) {
-        if constexpr ( std::is_same<DefaultInsertionMode, front_insertion>::value )
+        if constexpr ( std::is_same<DefaultInsertionMode, before_insertion>::value )
             return push_front ( std::forward<value_type> ( data_ ) );
         else
             return push_back ( std::forward<value_type> ( data_ ) );
     }
     template<typename... Args>
     [[maybe_unused]] storage_iterator emplace ( Args &&... args_ ) {
-        if constexpr ( std::is_same<DefaultInsertionMode, front_insertion>::value )
+        if constexpr ( std::is_same<DefaultInsertionMode, before_insertion>::value )
             return push_front ( std::forward<Args> ( args_ )... );
         else
             return emplace_back ( std::forward<Args> ( args_ )... );
     }
 
     [[maybe_unused]] storage_iterator push_front ( value_type const & data_ ) {
-        return ( this->*insert_front_implementation ) ( nodes.emplace ( data_ ) );
+        return ( this->*insert_before_implementation ) ( nodes.emplace ( data_ ) );
     }
     [[maybe_unused]] storage_iterator push_front ( value_type && data_ ) {
-        return ( this->*insert_front_implementation ) ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
+        return ( this->*insert_before_implementation ) ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
     [[maybe_unused]] storage_iterator emplace_front ( Args &&... args_ ) {
-        return ( this->*insert_front_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
+        return ( this->*insert_before_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
     private:
@@ -837,7 +845,7 @@ class unbounded_circular_list final {
         }
         [[maybe_unused]] concurrent_iterator & operator-- ( ) noexcept {
             if ( not node->prev )
-                unbounded_circular_list::repair_back_links ( node );
+                unbounded_circular_list::repair_after_links ( node );
             node = ( node_type_ptr ) node->prev;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
                 node = node->prev;
@@ -889,7 +897,7 @@ class unbounded_circular_list final {
         }
         [[maybe_unused]] const_concurrent_iterator & operator-- ( ) noexcept {
             if ( not node->prev )
-                unbounded_circular_list::repair_back_links ( node );
+                unbounded_circular_list::repair_after_links ( node );
             node = node->prev;
             if ( HEDLEY_UNLIKELY ( node == end_node and skip_end-- ) )
                 node = ( const_node_type_ptr ) node->prev;
@@ -1062,7 +1070,7 @@ class unbounded_circular_list final {
     }
 
     private:
-    static void repair_back_links ( node_type_ptr node_ ) noexcept {
+    static void repair_after_links ( node_type_ptr node_ ) noexcept {
         if ( HEDLEY_LIKELY ( node_ ) ) {
             counted_link * node = ( counted_link * ) node_->next_;
             while ( HEDLEY_LIKELY ( node != ( ( counted_link * ) node_ ) ) ) {
@@ -1073,7 +1081,7 @@ class unbounded_circular_list final {
     }
 
     public:
-    void repair_back_links ( ) noexcept { repair_back_links ( ( node_type_ptr ) end_link ); }
+    void repair_after_links ( ) noexcept { repair_after_links ( ( node_type_ptr ) end_link ); }
 
     template<typename Stream>
     std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> ostream ( Stream & out_ ) noexcept {
