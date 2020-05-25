@@ -513,8 +513,18 @@ class unbounded_circular_list final {
     using reference       = ValueType &;
     using const_reference = ValueType const &;
 
+    using aba_type = unsigned char;
+
     struct link_type {
         alignas ( 16 ) link_type * prev = nullptr, *next = nullptr;
+
+        void set_aba_id ( aba_type aba_id_ ) noexcept {
+            std::memcpy ( reinterpret_cast<aba_type *> ( &prev ) + hi_index<void *> ( ), &aba_id_, 1 );
+        }
+        // clears the current id
+        aba_type get_aba_id ( ) noexcept {
+            return std::link_exchange ( reinterpret_cast<aba_type *> ( &prev ) + hi_index<void *> ( ), ( aba_type ) 0 );
+        }
 
         [[nodiscard]] bool operator== ( link_type const & r_ ) const noexcept { return is_equal_m128 ( this, &r_ ); }
         [[nodiscard]] bool operator!= ( link_type const & r_ ) const noexcept { return not operator== ( this, &r_ ); }
@@ -537,6 +547,14 @@ class unbounded_circular_list final {
         link_type * value           = nullptr;
         counter_type external_count = 0;
 
+        void set_aba_id ( aba_type aba_id_ ) noexcept {
+            std::memcpy ( reinterpret_cast<aba_type *> ( &value ) + hi_index<void *> ( ), &aba_id_, 1 );
+        }
+        // clears the current id
+        aba_type get_aba_id ( ) noexcept {
+            return std::link_exchange ( reinterpret_cast<aba_type *> ( &value ) + hi_index<void *> ( ), ( aba_type ) 0 );
+        }
+
         [[nodiscard]] bool operator== ( pointer_type const & r_ ) const noexcept { return is_equal_m128 ( this, &r_ ); }
         [[nodiscard]] bool operator!= ( pointer_type const & r_ ) const noexcept { return not operator== ( this, &r_ ); }
 
@@ -554,15 +572,6 @@ class unbounded_circular_list final {
     struct link_pointer_type {
         link_type link;
         pointer_type pointer;
-
-        void set_aba_id ( unsigned char aba_id_ ) noexcept {
-            std::memcpy ( reinterpret_cast<unsigned char *> ( &link.prev ) + hi_index<void *> ( ), &aba_id_, 1 );
-        }
-        // clears the current id
-        unsigned char get_aba_id ( ) noexcept {
-            return std::link_exchange ( reinterpret_cast<unsigned char *> ( &link.prev ) + hi_index<void *> ( ),
-                                        ( unsigned char ) 0 );
-        }
 
         template<typename Stream>
         [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &>
@@ -640,27 +649,27 @@ class unbounded_circular_list final {
     }
 
     private:
-    [[nodiscard]] HEDLEY_ALWAYS_INLINE link_pointer_type get_exchange_link ( ) const noexcept {
+    [[nodiscard]] HEDLEY_ALWAYS_INLINE link_type get_link_exchange ( ) const noexcept {
         return end_node.link_exchange.load ( std::memory_order_relaxed );
     }
-    [[maybe_unused]] HEDLEY_ALWAYS_INLINE unsigned char load_exchange_link ( link_pointer_type & l_ ) const noexcept {
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE aba_type load_link_exchange ( link_type & l_ ) const noexcept {
         l_ = end_node.link_exchange.load ( std::memory_order_relaxed );
         return l_.get_aba_id ( );
     }
-    HEDLEY_ALWAYS_INLINE void store_exchange_link ( link_pointer_type l_, unsigned char aba_id_ = 0 ) noexcept {
+    HEDLEY_ALWAYS_INLINE void store_link_exchange ( link_type l_, aba_type aba_id_ = 0 ) noexcept {
         if ( aba_id_ )
             l_.set_aba_id ( aba_id_ );
-        end_node.link_exchange.store ( { std::forward<link_pointer_type> ( l_ ) }, std::memory_order_relaxed );
+        end_node.link_exchange.store ( { std::forward<link_type> ( l_ ) }, std::memory_order_relaxed );
     }
 
     HEDLEY_ALWAYS_INLINE void make_links_implementation ( node_type_ptr node_a_, node_type_ptr node_b_,
-                                                          unsigned char aba_id_ ) noexcept {
+                                                          aba_type aba_id_ ) noexcept {
         node_b_->counted = { &node_a_->counted.link, node_a_->counted.link.next, 1 };
-        store_exchange_link ( { node_a_->counted.link.prev, &node_b_->counted.link, 1 }, aba_id_ );
+        store_link_exchange ( { node_a_->counted.link.prev, &node_b_->counted.link, 1 }, aba_id_ );
     }
 
     template<typename Order>
-    HEDLEY_ALWAYS_INLINE void make_links ( node_type_ptr node_a_, node_type_ptr node_b_, unsigned char aba_id_ ) noexcept {
+    HEDLEY_ALWAYS_INLINE void make_links ( node_type_ptr node_a_, node_type_ptr node_b_, aba_type aba_id_ ) noexcept {
         if constexpr ( std::is_same<Order, insert_before>::value )
             make_links_implementation ( node_b_, node_a_, aba_id_ );
         else
@@ -672,10 +681,10 @@ class unbounded_circular_list final {
                                                                                           storage_iterator && it_ ) noexcept {
         node_type_ptr new_node = &*it_;
         link_pointer_type old;
-        unsigned char const new_aba_id = load_exchange_link ( old ) + 1;
+        aba_type const new_aba_id = load_link_exchange ( old ) + 1;
         make_links<Order> ( old_node_, new_node );
-        while ( not compare_and_swap_m128 ( &old.link, get_exchange_link ( ).link, &new_node->counted.link ) ) {
-            load_exchange_link ( old );
+        while ( not compare_and_swap_m128 ( &old.link, get_link_exchange ( ).link, &new_node->counted.link ) ) {
+            load_link_exchange ( old );
             make_links<Order> ( old_node_, new_node );
         }
         new_node->next->prev = new_node;
@@ -765,12 +774,25 @@ class unbounded_circular_list final {
         delete_implementation<true> ( std::forward<node_type_ptr> ( node_ ) );
     }
 
+    [[nodiscard]] HEDLEY_ALWAYS_INLINE pointer_type get_pointer_exchange ( ) const noexcept {
+        return end_node.pointer_exchange.load ( std::memory_order_relaxed );
+    }
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE aba_type load_pointer_exchange ( pointer_type & p_ ) const noexcept {
+        p_ = end_node.pointer_exchange.load ( std::memory_order_relaxed );
+        return p_.get_aba_id ( );
+    }
+    HEDLEY_ALWAYS_INLINE void store_pointer_exchange ( pointer_type p_, aba_type aba_id_ = 0 ) noexcept {
+        if ( aba_id_ )
+            p_.set_aba_id ( aba_id_ );
+        end_node.pointer_exchange.store ( { std::forward<pointer_type> ( p_ ) }, std::memory_order_relaxed );
+    }
+
     public:
     void pop ( ) noexcept {
-        link_pointer_type volatile old_end_link = load_exchange_link ( );
+        pointer_type volatile old_end_link = load_pointer_exchange ( );
         for ( ever ) {
             // increase external count
-            link_pointer_type new_counter;
+            pointer_type new_counter;
             do {
                 new_counter = old_end_link;
                 new_counter.external_count += 1;
@@ -797,11 +819,11 @@ class unbounded_circular_list final {
 
     // Atomically returns the new end link.
     link_type reverse ( ) noexcept {
-        link_pointer_type old_end_link = load_exchange_link ( ), new_end_link;
+        pointer_type old_end_link = load_pointer_exchange ( ), new_end_link;
         do {
             new_end_link = { old_end_link.next, old_end_link.prev };
-        } while ( not compare_and_swap_m128 ( &old_end_link, load_exchange_link ( ), &new_end_link ) );
-        return load_exchange_link ( ).link;
+        } while ( not compare_and_swap_m128 ( &old_end_link, load_pointer_exchange ( ), &new_end_link ) );
+        return load_pointer_exchange ( ).link;
     }
 
     class concurrent_iterator final {
