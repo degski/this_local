@@ -706,7 +706,7 @@ class unbounded_circular_list final {
     }
 
     template<typename Order>
-    [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_initial_implementation ( node_type_ptr old_node_,
+    [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_initial_implementation ( node_type_ptr,
                                                                                           storage_iterator && it_ ) noexcept {
         std::scoped_lock lock ( instance_mutex );
         node_type_ptr new_node = &*it_;
@@ -776,18 +776,18 @@ class unbounded_circular_list final {
 
     public:
     void pop ( ) noexcept {
-        counted_sentinel volatile old_sentinel = sentinel.load ( std::memory_order_relaxed );
+        counted_link_type volatile old_end_link = load_exchange_link ( );
         for ( ever ) {
             // increase external count
-            counted_link new_counter;
+            counted_link_type new_counter;
             do {
-                new_counter = *( ( counted_link * ) &old_sentinel );
+                new_counter = old_end_link;
                 new_counter.external_count += 1;
-            } while ( not compare_and_swap_m128 ( &old_sentinel, sentinel.load ( std::memory_order_relaxed ), &new_counter ) );
+            } while ( not compare_and_swap_m128 ( &old_end_link.link, sentinel.load ( std::memory_order_relaxed ), &new_counter ) );
             old_sentinel.external_count = new_counter.external_count;
             // we're poppin', go get the box
             if ( node_type_ptr node = old_sentinel.node; node ) {
-                if ( not compare_and_swap_m128 ( &old_sentinel, sentinel.load ( std::memory_order_relaxed ), &node->next ) ) {
+                if ( not compare_and_swap_m128 ( &old_end_link.link, sentinel.load ( std::memory_order_relaxed ), &node->next ) ) {
                     unsigned long count_increase = old_sentinel.external_count - 2;
                     if ( node->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
                         delete_order_relaxed ( node );
@@ -802,6 +802,15 @@ class unbounded_circular_list final {
                 return;
             }
         }
+    }
+
+    // Atomically returns the new end link.
+    link_type reverse ( ) noexcept {
+        counted_link_type old_end_link = load_exchange_link ( ), new_end_link;
+        do {
+            new_end_link = { old_end_link.next, old_end_link.prev };
+        } while ( not compare_and_swap_m128 ( &old_end_link, load_exchange_link ( ), &new_end_link ) );
+        return load_exchange_link ( ).link;
     }
 
     class concurrent_iterator final {
@@ -1050,15 +1059,6 @@ class unbounded_circular_list final {
     [[nodiscard]] const_iterator crend ( ) const noexcept { return cend_implementation ( 0 ); }
     [[nodiscard]] iterator rend ( ) noexcept { return end_implementation ( 0 ); }
 
-    // Atomically returns the new end link.
-    link_type reverse ( ) noexcept {
-        counted_link_type old_end_link = load_exchange_link ( ), new_end_link;
-        do {
-            new_end_link = { old_end_link.next, old_end_link.prev };
-        } while ( not compare_and_swap_m128 ( &old_end_link, load_exchange_link ( ), &new_end_link ) );
-        return load_exchange_link ( ).link;
-    }
-
     private:
     static void repair_after_links ( node_type_ptr node_ ) noexcept {
         if ( HEDLEY_LIKELY ( node_ ) ) {
@@ -1102,17 +1102,21 @@ template<typename T>
 class lock_free_stack {
     private:
     struct node;
+
     struct counted_node_ptr {
         int external_count;
         node * ptr;
     };
+
     struct node {
         std::shared_ptr<T> data;
         std::atomic<int> internal_count;
         counted_node_ptr next;
         node ( T const & data_ ) : data ( std::make_shared<T> ( data_ ) ), internal_count ( 0 ) {}
     };
+
     std::atomic<counted_node_ptr> head;
+
     void increase_head_count ( counted_node_ptr & old_counter ) {
         counted_node_ptr new_counter;
         do {
@@ -1128,14 +1132,17 @@ class lock_free_stack {
         while ( pop ( ) )
             ;
     }
+
     void push ( T const & data ) {
         counted_node_ptr new_node;
         new_node.ptr            = new node ( data );
         new_node.external_count = 1;
         new_node.ptr->next      = head.load ( std::memory_order_relaxed );
-        while ( !head.compare_exchange_weak ( new_node.ptr->next, new_node, std::memory_order_release, std::memory_order_relaxed ) )
-            ;
+        while (
+            not head.compare_exchange_weak ( new_node.ptr->next, new_node, std::memory_order_release, std::memory_order_relaxed ) )
+            continue;
     }
+
     std::shared_ptr<T> pop ( ) {
         counted_node_ptr old_head = head.load ( std::memory_order_relaxed );
         for ( ;; ) {
