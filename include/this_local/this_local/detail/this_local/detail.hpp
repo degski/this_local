@@ -525,12 +525,15 @@ class unbounded_circular_list final {
     using reference       = ValueType &;
     using const_reference = ValueType const &;
 
-    struct link {
-        alignas ( 16 ) link * prev = nullptr, *next = nullptr;
+    struct link_type {
+        alignas ( 16 ) link_type * prev = nullptr, *next = nullptr;
+
+        [[nodiscard]] bool operator== ( link_type const & r_ ) const noexcept { return equal_m128 ( this, &r_ ); }
+        [[nodiscard]] bool operator!= ( link_type const & r_ ) const noexcept { return unequal_m128 ( this, &r_ ); }
 
         template<typename Stream>
         [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> operator<< ( Stream & out_,
-                                                                                             link const & link_ ) noexcept {
+                                                                                             link_type const & link_ ) noexcept {
             auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
             if constexpr ( SAX_SYNCED_OSTREAMS )
                 std::scoped_lock lock ( ostream_mutex );
@@ -539,69 +542,74 @@ class unbounded_circular_list final {
         }
     };
 
-    struct counted_link : public link {
+    struct counted_link_type {
+        link_type link;
         unsigned long external_count = 0;
 
+        void set_aba_id ( unsigned char aba_id_ ) noexcept {
+            std::memcpy ( reinterpret_cast<unsigned char *> ( &link.prev ) + hi_index<void *> ( ), &aba_id_, 1 );
+        }
+        // clears the current id
+        unsigned char get_aba_id ( ) noexcept {
+            return std::exchange ( reinterpret_cast<unsigned char *> ( &link.prev ) + hi_index<void *> ( ), ( unsigned char ) 0 );
+        }
+
         template<typename Stream>
-        [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> operator<< ( Stream & out_,
-                                                                                             counted_link const & link_ ) noexcept {
+        [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &>
+        operator<< ( Stream & out_, counted_link_type const & counted_ ) noexcept {
             auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
             if constexpr ( SAX_SYNCED_OSTREAMS )
                 std::scoped_lock lock ( ostream_mutex );
-            out_ << "<c " << a ( link_.prev ) << ' ' << a ( link_.next ) << '.' << link_.external_count << '>';
+            out_ << "<c " << a ( counted_.link.prev ) << ' ' << a ( counted_.link.next ) << '.' << counted_.external_count << '>';
             return out_;
         }
     };
 
-    using counted_link_ptr       = counted_link *;
-    using const_counted_link_ptr = counted_link const *;
+    using counted_link_type_ptr       = counted_link_type *;
+    using const_counted_link_type_ptr = counted_link_type const *;
 
     struct end_node_type final {
-        std::atomic<counted_link> link;
+        std::atomic<counted_link_type> counted;
         std::atomic<unsigned long> internal_count = { 0 };
-
-        template<typename... Args>
-        end_node_type ( Args &&... args_ ) : data{ std::forward<Args> ( args_ )... } {}
 
         template<typename Stream>
         [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &>
-        operator<< ( Stream & out_, end_node_type const * link_ ) noexcept {
+        operator<< ( Stream & out_, end_node_type const * node_ ) noexcept {
             auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
             if constexpr ( SAX_SYNCED_OSTREAMS )
                 std::scoped_lock lock ( ostream_mutex );
-            out_ << "<n " << a ( &*link_ ) << ' ' << a ( link_->prev ) << ' ' << a ( link_->next ) << '.' << link_->internal_count
-                 << '-' << link_->external_count << '>';
+            out_ << "<n " << a ( node_ ) << ' ' << a ( node_->counted.link.prev ) << ' ' << a ( node_->counted.link.next ) << '.'
+                 << node_->internal_count << '-' << node_->counted.link.external_count << '>';
             return out_;
         }
         template<typename Stream>
         [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &>
-        operator<< ( Stream & out_, end_node_type const & link_ ) noexcept {
-            return operator<< ( out_, &link_ );
+        operator<< ( Stream & out_, end_node_type const & node_ ) noexcept {
+            return operator<< ( out_, &node_ );
         }
-
-        value_type data;
     };
 
-    struct node_type final : counted_link {
+    struct node_type final {
+        counted_link_type counted;
         std::atomic<unsigned long> internal_count = { 0 };
 
         template<typename... Args>
-        node_type ( Args &&... args_ ) : counted_link{ }, data{ std::forward<Args> ( args_ )... } {}
+        node_type ( Args &&... args_ ) : data{ std::forward<Args> ( args_ )... } {}
 
         template<typename Stream>
         [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> operator<< ( Stream & out_,
-                                                                                             node_type const * link_ ) noexcept {
+                                                                                             node_type const * node_ ) noexcept {
             auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
             if constexpr ( SAX_SYNCED_OSTREAMS )
                 std::scoped_lock lock ( ostream_mutex );
-            out_ << "<n " << a ( &*link_ ) << ' ' << a ( link_->prev ) << ' ' << a ( link_->next ) << '.' << link_->internal_count
-                 << '-' << link_->external_count << '>';
+            out_ << "<n " << a ( node_ ) << ' ' << a ( node_->counted.link.prev ) << ' ' << a ( node_->counted.link.next ) << '.'
+                 << node_->internal_count << '-' << node_->counted.link.external_count << '>';
             return out_;
         }
         template<typename Stream>
         [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> operator<< ( Stream & out_,
-                                                                                             node_type const & link_ ) noexcept {
-            return operator<< ( out_, &link_ );
+                                                                                             node_type const & node_ ) noexcept {
+            return operator<< ( out_, &node_ );
         }
 
         value_type data;
@@ -610,56 +618,30 @@ class unbounded_circular_list final {
     using node_type_ptr       = node_type *;
     using const_node_type_ptr = node_type const *;
 
-    struct counted_sentinel final : public counted_link {
-        node_type_ptr node = nullptr; // a sentinel value, the last node added
+    using storage_type    = plf::colony<node_type, allocator_type<node_type>>;
+    using size_type       = typename storage_type::size_type;
+    using difference_type = typename storage_type::difference_type;
 
-        template<typename Stream>
-        [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &>
-        operator<< ( Stream & out_, counted_sentinel const & link_ ) noexcept {
-            auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            if constexpr ( SAX_SYNCED_OSTREAMS )
-                std::scoped_lock lock ( ostream_mutex );
-            out_ << "<s " << a ( &link_ ) << ' ' << a ( link_->prev ) << ' ' << a ( link_->next ) << '.' << link_->internal_count
-                 << '-' << link_->external_count << '>';
-            return out_;
-        }
+    using storage_iterator       = typename storage_type::iterator;
+    using const_storage_iterator = typename storage_type::const_iterator;
 
-        [[nodiscard]] bool operator== ( counted_link const & r_ ) const noexcept { return equal_m128 ( this, &r_ ); }
-    };
-
-    using counted_end_link_ptr       = counted_sentinel *;
-    using const_counted_end_link_ptr = counted_sentinel const *;
-
-    using nodes_type      = plf::colony<node_type, allocator_type<node_type>>;
-    using size_type       = typename nodes_type::size_type;
-    using difference_type = typename nodes_type::difference_type;
-
-    // exposes the underlying container (not safe)
-
-    using nodes_iterator       = typename nodes_type::iterator;
-    using const_nodes_iterator = typename nodes_type::const_iterator;
-
-    [[nodiscard]] const_nodes_iterator nodes_begin ( ) const noexcept { return nodes.begin ( ); }
-    [[nodiscard]] const_nodes_iterator nodes_cbegin ( ) const noexcept { return nodes.cbegin ( ); }
-    [[nodiscard]] nodes_iterator nodes_begin ( ) noexcept { return nodes.begin ( ); }
-    [[nodiscard]] const_nodes_iterator nodes_end ( ) const noexcept { return nodes.end ( ); }
-    [[nodiscard]] const_nodes_iterator nodes_cend ( ) const noexcept { return nodes.cend ( ); }
-    [[nodiscard]] nodes_iterator nodes_end ( ) noexcept { return nodes.end ( ); }
+    [[nodiscard]] const_storage_iterator storage_begin ( ) const noexcept { return nodes.begin ( ); }
+    [[nodiscard]] const_storage_iterator storage_cbegin ( ) const noexcept { return nodes.cbegin ( ); }
+    [[nodiscard]] storage_iterator storage_begin ( ) noexcept { return nodes.begin ( ); }
+    [[nodiscard]] const_storage_iterator storage_end ( ) const noexcept { return nodes.end ( ); }
+    [[nodiscard]] const_storage_iterator storage_cend ( ) const noexcept { return nodes.cend ( ); }
+    [[nodiscard]] storage_iterator storage_end ( ) noexcept { return nodes.end ( ); }
 
     // class variables
 
     alignas ( 64 ) spin_rw_lock<long long> instance_mutex;
 
     private:
-    std::atomic<counted_sentinel> sentinel;
-    link end_link;
-
     end_node_type end_node;
+    storage_type nodes;
 
-    nodes_type nodes;
-
-    nodes_iterator ( unbounded_circular_list::*insert_front_implementation ) ( nodes_iterator && ) noexcept;
-    nodes_iterator ( unbounded_circular_list::*insert_back_implementation ) ( nodes_iterator && ) noexcept;
+    storage_iterator ( unbounded_circular_list::*insert_front_implementation ) ( storage_iterator && ) noexcept;
+    storage_iterator ( unbounded_circular_list::*insert_back_implementation ) ( storage_iterator && ) noexcept;
 
     // constructors
 
@@ -680,13 +662,22 @@ class unbounded_circular_list final {
     }
 
     private:
-    HEDLEY_ALWAYS_INLINE void store_sentinel ( node_type_ptr p_, counted_link l_, unsigned char aba_id_ = 0 ) noexcept {
-        std::memcpy ( reinterpret_cast<char *> ( &p_ ) + hi_index<node_type_ptr> ( ), &aba_id_, 1 );
-        sentinel.store ( { std::forward<counted_link> ( l_ ), std::forward<node_type_ptr> ( p_ ) }, std::memory_order_relaxed );
+    [[nodiscard]] HEDLEY_ALWAYS_INLINE counted_link_type load_end_link ( ) const noexcept {
+        return end_node.link.load ( std::memory_order_relaxed );
+    }
+
+    [[nodiscard]] HEDLEY_ALWAYS_INLINE unsigned char load_end_link ( counted_link_type & l_ ) const noexcept {
+        l_ = end_node.link.load ( std::memory_order_relaxed );
+        return l_.get_aba_id ( );
+    }
+
+    HEDLEY_ALWAYS_INLINE void store_end_link ( counted_link_type l_, unsigned char aba_id_ = 0 ) noexcept {
+        l_.set_aba_id ( aba_id_ );
+        end_node.store ( { std::forward<counted_link_type> ( l_ ) }, std::memory_order_relaxed );
     }
 
     template<typename At>
-    [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
+    [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_regular_implementation ( storage_iterator && it_ ) noexcept {
         node_type_ptr new_node = &*it_;
         // the body of the cas loop un-rolled once (same as below)
         counted_sentinel old             = sentinel.load ( std::memory_order_relaxed );
@@ -707,11 +698,11 @@ class unbounded_circular_list final {
                 store_sentinel ( new_node, counted_link{ link{ old.node->prev, ( link * ) new_node }, 1 }, new_aba_id );
         }
         new_node->next->prev = new_node;
-        return std::forward<nodes_iterator &&> ( it_ );
+        return std::forward<storage_iterator &&> ( it_ );
     }
 
     template<typename At>
-    [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_initial_implementation ( nodes_iterator && it_ ) noexcept {
+    [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_initial_implementation ( storage_iterator && it_ ) noexcept {
         std::scoped_lock lock ( instance_mutex );
         node_type_ptr new_node           = &*it_;
         *( ( counted_link * ) new_node ) = counted_link{ link{ &end_link, &end_link }, 1 };
@@ -724,49 +715,49 @@ class unbounded_circular_list final {
             store_sentinel ( new_node, counted_link{ link{ &end_link, &end_link }, 1 } );
             insert_back_implementation = &unbounded_circular_list::insert_regular_implementation<back_insertion>;
         }
-        return std::forward<nodes_iterator> ( it_ );
+        return std::forward<storage_iterator> ( it_ );
     }
 
     public:
-    [[maybe_unused]] nodes_iterator push_back ( value_type const & data_ ) {
+    [[maybe_unused]] storage_iterator push_back ( value_type const & data_ ) {
         return ( this->*insert_back_implementation ) ( nodes.emplace ( data_ ) );
     }
-    [[maybe_unused]] nodes_iterator push_back ( value_type && data_ ) {
+    [[maybe_unused]] storage_iterator push_back ( value_type && data_ ) {
         return ( this->*insert_back_implementation ) ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
-    [[maybe_unused]] nodes_iterator emplace_back ( Args &&... args_ ) {
+    [[maybe_unused]] storage_iterator emplace_back ( Args &&... args_ ) {
         return ( this->*insert_back_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
-    [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) {
+    [[maybe_unused]] storage_iterator push ( value_type const & data_ ) {
         if constexpr ( std::is_same<DefaultInsertionMode, front_insertion>::value )
             return push_front ( data_ );
         else
             return push_back ( data_ );
     }
-    [[maybe_unused]] nodes_iterator push ( value_type && data_ ) {
+    [[maybe_unused]] storage_iterator push ( value_type && data_ ) {
         if constexpr ( std::is_same<DefaultInsertionMode, front_insertion>::value )
             return push_front ( std::forward<value_type> ( data_ ) );
         else
             return push_back ( std::forward<value_type> ( data_ ) );
     }
     template<typename... Args>
-    [[maybe_unused]] nodes_iterator emplace ( Args &&... args_ ) {
+    [[maybe_unused]] storage_iterator emplace ( Args &&... args_ ) {
         if constexpr ( std::is_same<DefaultInsertionMode, front_insertion>::value )
             return push_front ( std::forward<Args> ( args_ )... );
         else
             return emplace_back ( std::forward<Args> ( args_ )... );
     }
 
-    [[maybe_unused]] nodes_iterator push_front ( value_type const & data_ ) {
+    [[maybe_unused]] storage_iterator push_front ( value_type const & data_ ) {
         return ( this->*insert_front_implementation ) ( nodes.emplace ( data_ ) );
     }
-    [[maybe_unused]] nodes_iterator push_front ( value_type && data_ ) {
+    [[maybe_unused]] storage_iterator push_front ( value_type && data_ ) {
         return ( this->*insert_front_implementation ) ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
     }
     template<typename... Args>
-    [[maybe_unused]] nodes_iterator emplace_front ( Args &&... args_ ) {
+    [[maybe_unused]] storage_iterator emplace_front ( Args &&... args_ ) {
         return ( this->*insert_front_implementation ) ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
     }
 
@@ -1062,14 +1053,13 @@ class unbounded_circular_list final {
     [[nodiscard]] const_iterator crend ( ) const noexcept { return cend_implementation ( 0 ); }
     [[nodiscard]] iterator rend ( ) noexcept { return end_implementation ( 0 ); }
 
-    [[nodiscard]] counted_link load_end_link ( ) const noexcept { return end_node.link.load ( std::memory_order_relaxed ); }
-
-    // safe!
-    void reverse ( ) noexcept {
-        counted_link old_end_link = load_end_link ( ), new_end_link;
+    // Atomically returns the new end link.
+    link_type reverse ( ) noexcept {
+        counted_link_type old_end_link = load_end_link ( ), new_end_link;
         do {
             new_end_link = { old_end_link.next, old_end_link.prev };
         } while ( not dwcas ( &old_end_link, load_end_link ( ), &new_end_link ) );
+        return load_end_link ( ).link;
     }
 
     private:
@@ -1110,9 +1100,6 @@ class unbounded_circular_list final {
 #endif
 
 } // namespace sax
-
-#include <atomic>
-#include <memory>
 
 template<typename T>
 class lock_free_stack {
@@ -1176,136 +1163,3 @@ class lock_free_stack {
         }
     }
 };
-
-#if 0
-template<typename ValueType, typename Allocator = std::allocator<ValueType>>
-class lock_free_plf_stack { // straigth from: C++ Concurrency In Action, 2nd Ed., Listing 7.13 - Anthony Williams
-
-    public:
-    using value_type      = ValueType;
-    using pointer         = ValueType *;
-    using reference       = ValueType &;
-    using const_pointer   = ValueType const *;
-    using const_reference = ValueType const &;
-
-    struct node;
-    using node_type_ptr       = node *;
-    using const_node_type_ptr = node const *;
-
-    struct counted_link {
-
-        node_type_ptr next;
-        long long external_count = 0;
-    };
-
-    struct node {
-
-        counted_link link;
-        std::atomic<long long> internal_count;
-
-        template<typename... Args>
-        node ( Args &&... args_ ) : internal_count{ 0 }, data{ std::forward<Args> ( args_ )... } {}
-
-        template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, const_node_type_ptr link_ ) noexcept {
-            auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            std::scoped_lock lock ( lock_free_plf_stack::global );
-            out_ << '<' << a ( link_ ) << ' ' << a ( link_->link.next ) << '>';
-            return out_;
-        }
-        template<typename Stream>
-        [[maybe_unused]] friend Stream & operator<< ( Stream & out_, node const & link_ ) noexcept {
-            return operator<< ( out_, &link_ );
-        }
-
-        value_type data;
-    };
-
-    private:
-    using nodes_type = plf::colony<node, typename Allocator::template rebind<node>::other>;
-
-    using nodes_iterator       = typename nodes_type::concurrent_iterator;
-    using const_nodes_iterator = typename nodes_type::const_concurrent_iterator;
-
-    nodes_type nodes;
-    std::atomic<counted_link> head;
-
-    public:
-    alignas ( 64 ) static spin_rw_lock<long long> global;
-
-    private:
-    HEDLEY_ALWAYS_INLINE void increase_head_count ( counted_link & old_counter_ ) noexcept {
-        counted_link new_counter;
-        do {
-            new_counter = old_counter_;
-            new_counter.external_count += 1;
-        } while (
-            not head.compare_exchange_strong ( old_counter_, new_counter, std::memory_order_acquire, std::memory_order_relaxed ) );
-        old_counter_.external_count = new_counter.external_count;
-    }
-
-    [[maybe_unused]] HEDLEY_ALWAYS_INLINE nodes_iterator insert_regular_implementation ( nodes_iterator && it_ ) noexcept {
-        counted_link link = { &*it_, 1 };
-        link.next->link   = head.load ( std::memory_order_relaxed );
-        while ( not head.compare_exchange_weak ( link.next->link, link, std::memory_order_release, std::memory_order_relaxed ) )
-            yield ( );
-        return std::forward<nodes_iterator> ( it_ );
-    }
-
-    public:
-    lock_free_plf_stack ( ) : head{ init_head ( ) } {}
-
-    [[maybe_unused]] nodes_iterator push ( value_type const & data_ ) {
-        return insert_regular_implementation ( nodes.emplace ( data_ ) );
-    }
-    [[maybe_unused]] nodes_iterator push ( value_type && data_ ) {
-        return insert_regular_implementation ( nodes.emplace ( std::forward<value_type> ( data_ ) ) );
-    }
-    template<typename... Args>
-    [[maybe_unused]] nodes_iterator emplace ( Args &&... args_ ) {
-        return insert_regular_implementation ( nodes.emplace ( std::forward<Args> ( args_ )... ) );
-    }
-
-    void pop ( ) noexcept {
-        counted_link old_sentinel = head.load ( std::memory_order_relaxed );
-        for ( ever ) {
-            increase_head_count ( old_sentinel );
-            if ( node_type_ptr const next = old_sentinel.next; next ) {
-                if ( head.compare_exchange_strong ( old_sentinel, next->link, std::memory_order_relaxed ) ) {
-                    int const count_increase = old_sentinel.external_count - 2;
-                    if ( next->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
-                        nodes.erase ( get_iterator_from_pointer ( next ) );
-                    return;
-                }
-                else {
-                    if ( next->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 ) {
-                        next->internal_count.load ( std::memory_order_acquire );
-                        nodes.erase ( get_iterator_from_pointer ( next ) );
-                    }
-                }
-            }
-            else {
-                return;
-            }
-        }
-    }
-
-    [[nodiscard]] const_nodes_iterator begin ( ) const noexcept { return nodes.begin ( ); }
-    [[nodiscard]] const_nodes_iterator cbegin ( ) const noexcept { return nodes.cbegin ( ); }
-    [[nodiscard]] nodes_iterator begin ( ) noexcept { return nodes.begin ( ); }
-    [[nodiscard]] const_nodes_iterator end ( ) const noexcept { return nodes.end ( ); }
-    [[nodiscard]] const_nodes_iterator cend ( ) const noexcept { return nodes.cend ( ); }
-    [[nodiscard]] nodes_iterator end ( ) noexcept { return nodes.end ( ); }
-
-    counted_link init_head ( ) {
-        nodes_iterator it = nodes.emplace ( );
-        counted_link p;
-        p.next = &*it;
-        nodes.erase ( it );
-        return p;
-    }
-};
-
-template<typename ValueType, typename Allocator>
-alignas ( 64 ) spin_rw_lock<long long> lock_free_plf_stack<ValueType, Allocator>::global;
-#endif
