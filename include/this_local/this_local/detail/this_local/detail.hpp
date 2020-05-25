@@ -513,17 +513,14 @@ class unbounded_circular_list final {
     using reference       = ValueType &;
     using const_reference = ValueType const &;
 
-    using aba_type = unsigned char;
+    using counter_type = unsigned char;
 
     struct link_type {
         alignas ( 16 ) link_type * prev = nullptr, *next = nullptr;
 
-        void set_aba_id ( aba_type aba_id_ ) noexcept {
-            std::memcpy ( reinterpret_cast<aba_type *> ( &prev ) + hi_index<void *> ( ), &aba_id_, 1 );
-        }
-        // clears the current id
-        aba_type get_aba_id ( ) noexcept {
-            return std::link_exchange ( reinterpret_cast<aba_type *> ( &prev ) + hi_index<void *> ( ), ( aba_type ) 0 );
+        [[maybe_unused]] counter_type fetch_and_add ( int incr_ = 1 ) noexcept {
+            counter_type & ctr = *( reinterpret_cast<counter_type *> ( &prev ) + hi_index<void *> ( ) );
+            return std::exchange ( ctr, char ( ctr + incr_ ) );
         }
 
         [[nodiscard]] bool operator== ( link_type const & r_ ) const noexcept { return is_equal_m128 ( this, &r_ ); }
@@ -540,19 +537,12 @@ class unbounded_circular_list final {
         }
     };
 
-    using counter_type = unsigned long long;
+    struct pointer_type {
+        link_type * value = nullptr;
 
-    struct alignas ( 16 ) pointer_type {
-        // williams reversed
-        link_type * value           = nullptr;
-        counter_type external_count = 0;
-
-        void set_aba_id ( aba_type aba_id_ ) noexcept {
-            std::memcpy ( reinterpret_cast<aba_type *> ( &value ) + hi_index<void *> ( ), &aba_id_, 1 );
-        }
-        // clears the current id
-        aba_type get_aba_id ( ) noexcept {
-            return std::link_exchange ( reinterpret_cast<aba_type *> ( &value ) + hi_index<void *> ( ), ( aba_type ) 0 );
+        [[maybe_unused]] counter_type fetch_and_add ( int incr_ = 1 ) noexcept {
+            counter_type & ctr = *( reinterpret_cast<counter_type *> ( &value ) + hi_index<void *> ( ) );
+            return std::exchange ( ctr, char ( ctr + incr_ ) );
         }
 
         [[nodiscard]] bool operator== ( pointer_type const & r_ ) const noexcept { return is_equal_m128 ( this, &r_ ); }
@@ -569,33 +559,14 @@ class unbounded_circular_list final {
         }
     };
 
-    struct link_pointer_type {
-        link_type link;
-        pointer_type pointer;
-
-        template<typename Stream>
-        [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &>
-        operator<< ( Stream & out_, link_pointer_type const & counted_ ) noexcept {
-            auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
-            if constexpr ( SAX_SYNCED_OSTREAMS )
-                std::scoped_lock lock ( ostream_mutex );
-            out_ << "<c " << a ( counted_.link.prev ) << ' ' << a ( counted_.link.next ) << '.' << counted_.external_count << '>';
-            return out_;
-        }
-    };
-
     struct end_node_type final {
-        link_pointer_type counted;
-        std::atomic<counter_type> internal_count = { 0 };
-
+        link_type link;
         std::atomic<link_type> link_exchange;
         std::atomic<pointer_type> pointer_exchange;
     };
 
     struct node_type final {
-        link_pointer_type counted;
-        std::atomic<counter_type> internal_count = { 0 };
-
+        link_type link;
         value_type data;
 
         template<typename... Args>
@@ -652,29 +623,29 @@ class unbounded_circular_list final {
     [[nodiscard]] HEDLEY_ALWAYS_INLINE link_type get_link_exchange ( ) const noexcept {
         return end_node.link_exchange.load ( std::memory_order_relaxed );
     }
-    [[maybe_unused]] HEDLEY_ALWAYS_INLINE aba_type load_link_exchange ( link_type & l_ ) const noexcept {
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE counter_type load_link_exchange ( link_type & l_ ) const noexcept {
         l_ = end_node.link_exchange.load ( std::memory_order_relaxed );
-        return l_.get_aba_id ( );
+        return l_.get_counter ( );
     }
-    [[maybe_unused]] HEDLEY_ALWAYS_INLINE link_type store_link_exchange ( link_type l_, aba_type aba_id_ = 0 ) noexcept {
-        if ( aba_id_ )
-            l_.set_aba_id ( aba_id_ );
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE link_type store_link_exchange ( link_type l_, counter_type value_ = 0 ) noexcept {
+        if ( value_ )
+            l_.set_counter ( value_ );
         end_node.link_exchange.store ( l_, std::memory_order_relaxed );
         return std::forward<link_type> ( l_ );
     }
 
     HEDLEY_ALWAYS_INLINE void make_links_implementation ( node_type_ptr node_a_, node_type_ptr node_b_,
-                                                          aba_type aba_id_ ) noexcept {
+                                                          counter_type value_ ) noexcept {
         node_b_->counted = { &node_a_->counted.link, node_a_->counted.link.next, 1 };
-        store_link_exchange ( { node_a_->counted.link.prev, &node_b_->counted.link, 1 }, aba_id_ );
+        store_link_exchange ( { node_a_->counted.link.prev, &node_b_->counted.link, 1 }, value_ );
     }
 
     template<typename Order>
-    HEDLEY_ALWAYS_INLINE void make_links ( node_type_ptr node_a_, node_type_ptr node_b_, aba_type aba_id_ ) noexcept {
+    HEDLEY_ALWAYS_INLINE void make_links ( node_type_ptr node_a_, node_type_ptr node_b_, counter_type value_ ) noexcept {
         if constexpr ( std::is_same<Order, insert_before>::value )
-            make_links_implementation ( node_b_, node_a_, aba_id_ );
+            make_links_implementation ( node_b_, node_a_, value_ );
         else
-            make_links_implementation ( node_a_, node_b_, aba_id_ );
+            make_links_implementation ( node_a_, node_b_, value_ );
     }
 
     template<typename Order>
@@ -682,10 +653,10 @@ class unbounded_circular_list final {
                                                                                           storage_iterator && it_ ) noexcept {
         node_type_ptr new_node = &*it_;
         link_pointer_type old;
-        aba_type const new_aba_id = load_link_exchange ( old ) + 1;
+        counter_type const new_aba_id = load_link_exchange ( old ) + 1;
         make_links<Order> ( old_node_, new_node, new_aba_id );
         while ( not compare_and_swap_m128 ( &old.link, get_link_exchange ( ).link, &new_node->counted.link ) ) {
-            load_link_exchange ( old );
+            load_link_exchange ( old ); // removes and returns the id of ols and clears the id
             make_links<Order> ( old_node_, new_node, new_aba_id );
         }
         new_node->next->prev = new_node;
@@ -700,7 +671,7 @@ class unbounded_circular_list final {
         std::scoped_lock lock ( instance_mutex );
         if ( not_yet_created ) {
             node_type_ptr new_node = &*it_;
-            make_links<Order> ( &end_node.counted.link, new_node, 0 );
+            make_links<Order> ( &end_node.link, new_node, 0 );
             insert_before_implementation = &unbounded_circular_list::insert_regular_implementation<insert_before>;
             insert_after_implementation  = &unbounded_circular_list::insert_regular_implementation<insert_after>;
             not_yet_created              = false;
@@ -761,54 +732,47 @@ class unbounded_circular_list final {
 
     private:
     template<bool MemoryOrderAcquire>
-    void delete_implementation ( node_type_ptr node_ ) noexcept {
+    void ordered_delete_implementation ( node_type_ptr node_ ) noexcept {
         if constexpr ( MemoryOrderAcquire )
             auto const _ = node_->internal_count.load ( std::memory_order_acquire );
         node_->prev = node_->next = nullptr; // !
         nodes.erase ( nodes.get_iterator_from_pointer ( node_ ) );
     }
 
-    void delete_order_relaxed ( node_type_ptr node_ ) noexcept {
-        delete_implementation<false> ( std::forward<node_type_ptr> ( node_ ) );
-    }
-    void delete_order_acquire ( node_type_ptr node_ ) noexcept {
-        delete_implementation<true> ( std::forward<node_type_ptr> ( node_ ) );
-    }
-
     [[nodiscard]] HEDLEY_ALWAYS_INLINE pointer_type get_pointer_exchange ( ) const noexcept {
         return end_node.pointer_exchange.load ( std::memory_order_relaxed );
     }
-    [[maybe_unused]] HEDLEY_ALWAYS_INLINE aba_type load_pointer_exchange ( pointer_type & p_ ) const noexcept {
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE counter_type load_pointer_exchange ( pointer_type & p_ ) const noexcept {
         p_ = end_node.pointer_exchange.load ( std::memory_order_relaxed );
-        return p_.get_aba_id ( );
+        return p_.get_counter ( );
     }
-    HEDLEY_ALWAYS_INLINE pointer_type store_pointer_exchange ( pointer_type p_, aba_type aba_id_ = 0 ) noexcept {
-        if ( aba_id_ )
-            p_.set_aba_id ( aba_id_ );
+    HEDLEY_ALWAYS_INLINE pointer_type store_pointer_exchange ( pointer_type p_, counter_type value_ = 0 ) noexcept {
+        if ( value_ )
+            p_.set_counter ( value_ );
         end_node.pointer_exchange.store ( p_, std::memory_order_relaxed );
         return std::forward<pointer_type> ( p_ );
     }
 
-    void delete_implementation ( node_type_ptr old_node_ ) noexcept {
-        pointer_type volatile old_pointer = store_pointer_exchange ( { old_node_, 1 } );
+    void delete_node_implementation ( node_type_ptr old_node_ ) noexcept {
+        pointer_type volatile old_pointer = store_pointer_exchange ( old_node_ );
         for ( ever ) {
             // increase external count
             pointer_type new_pointer;
             do {
                 new_pointer = old_pointer;
-                new_pointer.external_count += 1;
+                new_pointer.fetch_and_add ( 1 );
             } while ( not compare_and_swap_m128 ( &old_pointer, get_pointer_exchange ( ), &new_pointer ) );
-            old_pointer.external_count = new_pointer.external_count;
+            old_pointer = new_pointer;
             // we're poppin', go get the box
             if ( not compare_and_swap_m128 ( &old_pointer, get_pointer_exchange ( ), &old_node_->link.next ) ) {
-                counter_type count_increase = old_pointer.external_count - 2;
+                counter_type count_increase = old_pointer.fetch_and_add ( -2 );
                 if ( old_node_->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
-                    delete_order_relaxed ( old_node_ );
+                    ordered_delete_implementation<false> ( std::forward<node_type_ptr> ( old_node_ ) );
                 return;
             }
             else {
                 if ( old_node_->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 )
-                    delete_order_acquire ( old_node_ );
+                    ordered_delete_implementation<true> ( std::forward<node_type_ptr> ( old_node_ ) );
             }
         }
     }
