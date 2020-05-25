@@ -709,17 +709,9 @@ class unbounded_circular_list final {
     [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_initial_implementation ( node_type_ptr old_node_,
                                                                                           storage_iterator && it_ ) noexcept {
         std::scoped_lock lock ( instance_mutex );
-        node_type_ptr new_node           = &*it_;
-        *( ( counted_link * ) new_node ) = counted_link{ link{ &end_link, &end_link }, 1 };
-        end_link                         = link{ ( link * ) new_node, ( link * ) new_node };
-        if constexpr ( std::is_same<Order, insert_before>::value ) {
-            store_sentinel ( ( node_type_ptr ) &end_link, counted_link{ link{ &end_link, &end_link }, 1 } );
-            insert_before_implementation = &unbounded_circular_list::insert_regular_implementation<insert_before>;
-        }
-        else {
-            store_sentinel ( new_node, counted_link{ link{ &end_link, &end_link }, 1 } );
-            insert_after_implementation = &unbounded_circular_list::insert_regular_implementation<insert_after>;
-        }
+        node_type_ptr new_node = &*it_;
+        make_links<Order> ( &end_node.counted.link, new_node, 0 );
+        insert_before_implementation = &unbounded_circular_list::insert_regular_implementation<Order>;
         return std::forward<storage_iterator> ( it_ );
     }
 
