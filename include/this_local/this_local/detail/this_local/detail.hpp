@@ -105,16 +105,21 @@ namespace detail {
 template<typename ValueType>
 [[nodiscard]] inline constexpr std::enable_if_t<SAX_ENABLE_OSTREAMS, std::uint16_t>
 abbreviate_pointer_implementation ( std::uintptr_t pointer_ ) noexcept {
-    //
-    // Byte 8 is empty, byte 7 used to be empty but is now 'reserved' by Microsoft The 'old' 48-bit pointer corresponds to the
-    // addressable space of Intel hardware (we'll ignore this one). The below implemented mapping from 2^48 space to 2^16 space,
-    // results 2^32 theroretical collisions per pointer. I think in practice (because the space is not cut up randomly, but split
-    // into user/kernel space and probably many more partitions internally) the chance of collissions is fairly small.
-    //
-    pointer_ ^= pointer_ >> 16;
-    pointer_ ^= pointer_ >> 32;
-    pointer_ ^= pointer_ >> 16;
-    return ( std::uint16_t ) pointer_;
+    if ( pointer_ ) {
+        //
+        // Byte 8 is empty, byte 7 used to be empty but is now 'reserved' by Microsoft The 'old' 48-bit pointer corresponds to the
+        // addressable space of Intel hardware (we'll ignore this one). The below implemented mapping from 2^48 space to 2^16 space,
+        // results 2^32 theroretical collisions per pointer. I think in practice (because the space is not cut up randomly, but
+        // split into user/kernel space and probably many more partitions internally) the chance of collissions is fairly small.
+        //
+        pointer_ ^= pointer_ >> 16;
+        pointer_ ^= pointer_ >> 32;
+        pointer_ ^= pointer_ >> 16;
+        return ( std::uint16_t ) pointer_;
+    }
+    else {
+        return 0xFF'FF;
+    }
 }
 } // namespace detail
 template<typename ValueType>
@@ -508,7 +513,7 @@ class unbounded_circular_list final {
     public:
     using value_type = ValueType;
     template<typename Type>
-    using allocator              = Allocator<Type>;
+    using allocator_type         = Allocator<Type>;
     using default_insertion_mode = DefaultInsertionMode;
 
     struct front_insertion {};
@@ -521,7 +526,7 @@ class unbounded_circular_list final {
     using const_reference = ValueType const &;
 
     struct link {
-        alignas ( 16 ) link * prev, *next;
+        alignas ( 16 ) link * prev = nullptr, *next = nullptr;
 
         template<typename Stream>
         [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> operator<< ( Stream & out_,
@@ -535,7 +540,7 @@ class unbounded_circular_list final {
     };
 
     struct counted_link : public link {
-        unsigned long external_count;
+        unsigned long external_count = 0;
 
         template<typename Stream>
         [[maybe_unused]] friend std::enable_if_t<SAX_ENABLE_OSTREAMS, Stream &> operator<< ( Stream & out_,
@@ -599,7 +604,9 @@ class unbounded_circular_list final {
     using counted_end_link_ptr       = counted_sentinel *;
     using const_counted_end_link_ptr = counted_sentinel const *;
 
-    using nodes_type = plf::colony<node, allocator<node>>;
+    using nodes_type      = plf::colony<node, allocator_type<node>>;
+    using size_type       = typename nodes_type::size_type;
+    using difference_type = typename nodes_type::difference_type;
 
     // exposes the underlying container (not safe)
 
@@ -615,11 +622,12 @@ class unbounded_circular_list final {
 
     // class variables
 
-    alignas ( 64 ) spin_rw_lock<long long> instance;
+    alignas ( 64 ) spin_rw_lock<long long> instance_mutex;
 
     private:
     std::atomic<counted_sentinel> sentinel;
     link end_link;
+
     nodes_type nodes;
 
     nodes_iterator ( unbounded_circular_list::*insert_front_implementation ) ( nodes_iterator && ) noexcept;
@@ -676,7 +684,7 @@ class unbounded_circular_list final {
 
     template<typename At>
     [[maybe_unused]] HEDLEY_NEVER_INLINE nodes_iterator insert_initial_implementation ( nodes_iterator && it_ ) noexcept {
-        std::scoped_lock lock ( instance );
+        std::scoped_lock lock ( instance_mutex );
         node_ptr new_node                = &*it_;
         *( ( counted_link * ) new_node ) = counted_link{ link{ &end_link, &end_link }, 1 };
         end_link                         = link{ ( link * ) new_node, ( link * ) new_node };
@@ -1022,6 +1030,14 @@ class unbounded_circular_list final {
     [[nodiscard]] const_iterator crend ( ) const noexcept { return cend_implementation ( 0 ); }
     [[nodiscard]] iterator rend ( ) noexcept { return end_implementation ( 0 ); }
 
+    // safe!
+    void reverse ( ) noexcept {
+        counted_link new_end_link;
+        do {
+            new_end_link = { end_link.next, end_link.prev };
+        } while ( not dwcas ( &end_link, end_link.load ( std::memory_order_relaxed ), &new_end_link ) );
+    }
+
     private:
     static void repair_back_links ( node_ptr node_ ) noexcept {
         if ( HEDLEY_LIKELY ( node_ ) ) {
@@ -1060,6 +1076,72 @@ class unbounded_circular_list final {
 #endif
 
 } // namespace sax
+
+#include <atomic>
+#include <memory>
+
+template<typename T>
+class lock_free_stack {
+    private:
+    struct node;
+    struct counted_node_ptr {
+        int external_count;
+        node * ptr;
+    };
+    struct node {
+        std::shared_ptr<T> data;
+        std::atomic<int> internal_count;
+        counted_node_ptr next;
+        node ( T const & data_ ) : data ( std::make_shared<T> ( data_ ) ), internal_count ( 0 ) {}
+    };
+    std::atomic<counted_node_ptr> head;
+    void increase_head_count ( counted_node_ptr & old_counter ) {
+        counted_node_ptr new_counter;
+        do {
+            new_counter = old_counter;
+            ++new_counter.external_count;
+        } while (
+            !head.compare_exchange_strong ( old_counter, new_counter, std::memory_order_acquire, std::memory_order_relaxed ) );
+        old_counter.external_count = new_counter.external_count;
+    }
+
+    public:
+    ~lock_free_stack ( ) {
+        while ( pop ( ) )
+            ;
+    }
+    void push ( T const & data ) {
+        counted_node_ptr new_node;
+        new_node.ptr            = new node ( data );
+        new_node.external_count = 1;
+        new_node.ptr->next      = head.load ( std::memory_order_relaxed );
+        while ( !head.compare_exchange_weak ( new_node.ptr->next, new_node, std::memory_order_release, std::memory_order_relaxed ) )
+            ;
+    }
+    std::shared_ptr<T> pop ( ) {
+        counted_node_ptr old_head = head.load ( std::memory_order_relaxed );
+        for ( ;; ) {
+            increase_head_count ( old_head );
+            node * const ptr = old_head.ptr;
+            if ( !ptr ) {
+                return std::shared_ptr<T> ( );
+            }
+            if ( head.compare_exchange_strong ( old_head, ptr->next, std::memory_order_relaxed ) ) {
+                std::shared_ptr<T> res;
+                res.swap ( ptr->data );
+                int const count_increase = old_head.external_count - 2;
+                if ( ptr->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase ) {
+                    delete ptr;
+                }
+                return res;
+            }
+            else if ( ptr->internal_count.fetch_add ( -1, std::memory_order_relaxed ) == 1 ) {
+                ptr->internal_count.load ( std::memory_order_acquire );
+                delete ptr;
+            }
+        }
+    }
+};
 
 #if 0
 template<typename ValueType, typename Allocator = std::allocator<ValueType>>
