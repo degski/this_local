@@ -519,8 +519,10 @@ class alignas ( 64 ) unbounded_circular_list final {
         alignas ( 16 ) link_type * prev = nullptr, *next = nullptr;
 
         [[maybe_unused]] counter_type fetch_add ( int incr_ = 1 ) noexcept {
-            counter_type & ctr = *( reinterpret_cast<counter_type *> ( &prev ) + hi_index<void *> ( ) );
-            return std::exchange ( ctr, char ( ctr + incr_ ) );
+            return std::exchange ( fetch ( ), char ( fetch ( ) + incr_ ) );
+        }
+        [[maybe_unused]] counter_type & fetch ( ) noexcept {
+            return *( reinterpret_cast<counter_type *> ( &prev ) + hi_index<void *> ( ) );
         }
 
         [[nodiscard]] bool operator== ( link_type const & r_ ) const noexcept { return is_equal_m128 ( this, &r_ ); }
@@ -532,7 +534,7 @@ class alignas ( 64 ) unbounded_circular_list final {
             auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
             if constexpr ( SAX_SYNCED_OSTREAMS )
                 std::scoped_lock lock ( ostream_mutex );
-            out_ << "<l " << a ( link_.prev ) << ' ' << a ( link_.next ) << '>';
+            out_ << "<l " << a ( link_.prev ) << ' ' << a ( link_.next ) << '.' << link_.fetch ( ) << '>';
             return out_;
         }
     };
@@ -541,8 +543,10 @@ class alignas ( 64 ) unbounded_circular_list final {
         link_type * value = nullptr;
 
         [[maybe_unused]] counter_type fetch_add ( int incr_ = 1 ) noexcept {
-            counter_type & ctr = *( reinterpret_cast<counter_type *> ( &value ) + hi_index<void *> ( ) );
-            return std::exchange ( ctr, char ( ctr + incr_ ) );
+            return std::exchange ( fetch ( ), char ( fetch ( ) + incr_ ) );
+        }
+        [[maybe_unused]] counter_type fetch ( ) const noexcept {
+            return *( reinterpret_cast<counter_type *> ( &value ) + hi_index<void *> ( ) );
         }
 
         [[nodiscard]] bool operator== ( pointer_type const & r_ ) const noexcept { return is_equal_m128 ( this, &r_ ); }
@@ -554,7 +558,7 @@ class alignas ( 64 ) unbounded_circular_list final {
             auto a = [] ( auto p ) { return abbreviate_pointer ( p ); };
             if constexpr ( SAX_SYNCED_OSTREAMS )
                 std::scoped_lock lock ( ostream_mutex );
-            out_ << "<p " << a ( pointer_.value ) << '.' << pointer_.external_count << '>';
+            out_ << "<p " << a ( pointer_.value ) << '.' << pointer_.fetch ( ) << '>';
             return out_;
         }
     };
