@@ -599,7 +599,7 @@ class alignas ( 64 ) unbounded_circular_list final {
     // class variables
 
     spin_rw_lock<long long> instance_mutex;
-    std::atomic<long long> id = 0;
+    std::atomic<int> id = 0, thread_count = 0;
 
     private:
     end_node_type end_node;
@@ -634,7 +634,7 @@ class alignas ( 64 ) unbounded_circular_list final {
         l_ = end_node.link_exchange.load ( std::memory_order_relaxed );
         return l_.get ( );
     }
-    [[maybe_unused]] HEDLEY_ALWAYS_INLINE link_type store_link_exchange ( link_type l_, counter_type value_ = 0 ) noexcept {
+    [[maybe_unused]] HEDLEY_ALWAYS_INLINE link_type store_link_exchange ( link_type l_, counter_type value_ ) noexcept {
         if ( value_ )
             l_.set ( value_ );
         end_node.link_exchange.store ( l_, std::memory_order_relaxed );
@@ -643,8 +643,8 @@ class alignas ( 64 ) unbounded_circular_list final {
 
     HEDLEY_ALWAYS_INLINE void make_links_implementation ( node_type_ptr node_a_, node_type_ptr node_b_,
                                                           counter_type value_ ) noexcept {
-        node_b_->counted = { &node_a_->counted.link, node_a_->counted.link.next, 1 };
-        store_link_exchange ( { node_a_->counted.link.prev, &node_b_->counted.link, 1 }, value_ );
+        node_b_->counted = { &node_a_->counted.link, node_a_->counted.link.next };
+        store_link_exchange ( { node_a_->counted.link.prev, &node_b_->counted.link }, value_ );
     }
 
     template<typename Order>
@@ -658,6 +658,27 @@ class alignas ( 64 ) unbounded_circular_list final {
     template<typename Order>
     [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_regular_implementation ( node_type_ptr old_node_,
                                                                                           storage_iterator && it_ ) noexcept {
+        if ( HEDLEY_LIKELY ( 1 == thread_count.load ( std::memory_order_relaxed ) ) ) {
+            node_type_ptr new_node = &*it_;
+            make_links<Order> ( new_node, old_node_, 0 );
+            new_node->next->prev = new_node;
+            return std::forward<storage_iterator &&> ( it_ );
+        }
+        else {
+            insert_before_implementation = &unbounded_circular_list::insert_regular_threaded_implementation<insert_before>;
+            insert_after_implementation  = &unbounded_circular_list::insert_regular_threaded_implementation<insert_after>;
+            if constexpr ( std::is_same<Order, insert_before>::value )
+                return insert_before_implementation ( old_node_,
+                                                      std::forward<storage_iterator> ( it_ ) ); // maybe wrong order 50/50
+            else
+                return insert_after_implementation ( new_node,
+                                                     std::forward<storage_iterator> ( it_ ) ); // maybe wrong order 50/50
+        }
+    }
+
+    template<typename Order>
+    [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator
+    insert_regular_threaded_implementation ( node_type_ptr old_node_, storage_iterator && it_ ) noexcept {
         node_type_ptr new_node = &*it_;
         link_pointer_type old;
         counter_type const new_aba_id = load_link_exchange ( old ) + 1;
@@ -673,24 +694,23 @@ class alignas ( 64 ) unbounded_circular_list final {
     template<typename Order>
     [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_initial_implementation ( node_type_ptr,
                                                                                           storage_iterator && it_ ) noexcept {
-        static bool not_yet_created = true;
-
         std::scoped_lock lock ( instance_mutex );
-        if ( not_yet_created ) {
+        if ( not thread_count++ ) {
             node_type_ptr new_node = &*it_;
             make_links<Order> ( &end_node.link, new_node, 0 );
             insert_before_implementation = &unbounded_circular_list::insert_regular_implementation<insert_before>;
             insert_after_implementation  = &unbounded_circular_list::insert_regular_implementation<insert_after>;
-            not_yet_created              = false;
             return std::forward<storage_iterator> ( it_ );
         }
         else {
+            insert_before_implementation = &unbounded_circular_list::insert_regular_threaded_implementation<insert_before>;
+            insert_after_implementation  = &unbounded_circular_list::insert_regular_threaded_implementation<insert_after>;
             if constexpr ( std::is_same<Order, insert_before>::value )
-                return insert_regular_implementation ( reinterpret_cast<node_type_ptr> ( &end_node ),
-                                                       std::forward<storage_iterator> ( it_ ) ); // maybe wrong order 50/50
+                return insert_before_implementation ( reinterpret_cast<node_type_ptr> ( &end_node ),
+                                                      std::forward<storage_iterator> ( it_ ) ); // maybe wrong order 50/50
             else
-                return insert_regular_implementation ( new_node,
-                                                       std::forward<storage_iterator> ( it_ ) ); // maybe wrong order 50/50
+                return insert_after_implementation ( new_node,
+                                                     std::forward<storage_iterator> ( it_ ) ); // maybe wrong order 50/50
         }
     }
 
@@ -753,7 +773,7 @@ class alignas ( 64 ) unbounded_circular_list final {
             pointer_type new_pointer;
             do {
                 new_pointer = old_pointer;
-                new_pointer.fetch_add ( 1 );
+                new_pointer.get_add ( 1 );
             } while ( not compare_and_swap_m128 ( &old_pointer, end_node.pointer_exchange.load ( std::memory_order_relaxed ),
                                                   &new_pointer ) );
             old_pointer = new_pointer;
@@ -762,7 +782,7 @@ class alignas ( 64 ) unbounded_circular_list final {
 
                 if ( not compare_and_swap_m128 ( &old_pointer, end_node.pointer_exchange.load ( std::memory_order_relaxed ),
                                                  &old_node_->link.next ) ) {
-                counter_type count_increase = old_pointer.fetch_add ( -2 );
+                int count_increase = old_pointer.get_add ( -2 );
                 if ( old_node_->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
                     ordered_delete_implementation<false> ( std::forward<node_type_ptr> ( old_node_ ) );
                 return;
