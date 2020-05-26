@@ -496,7 +496,7 @@ struct insert_after {};
 
 namespace lockless {
 template<typename ValueType, template<typename> typename Allocator = std::allocator, typename DefaultInsertionMode = insert_after>
-class unbounded_circular_list final {
+class alignas ( 64 ) unbounded_circular_list final {
 
     public:
     using value_type = ValueType;
@@ -518,7 +518,7 @@ class unbounded_circular_list final {
     struct link_type {
         alignas ( 16 ) link_type * prev = nullptr, *next = nullptr;
 
-        [[maybe_unused]] counter_type fetch_and_add ( int incr_ = 1 ) noexcept {
+        [[maybe_unused]] counter_type fetch_add ( int incr_ = 1 ) noexcept {
             counter_type & ctr = *( reinterpret_cast<counter_type *> ( &prev ) + hi_index<void *> ( ) );
             return std::exchange ( ctr, char ( ctr + incr_ ) );
         }
@@ -540,7 +540,7 @@ class unbounded_circular_list final {
     struct pointer_type {
         link_type * value = nullptr;
 
-        [[maybe_unused]] counter_type fetch_and_add ( int incr_ = 1 ) noexcept {
+        [[maybe_unused]] counter_type fetch_add ( int incr_ = 1 ) noexcept {
             counter_type & ctr = *( reinterpret_cast<counter_type *> ( &value ) + hi_index<void *> ( ) );
             return std::exchange ( ctr, char ( ctr + incr_ ) );
         }
@@ -592,7 +592,7 @@ class unbounded_circular_list final {
 
     // class variables
 
-    alignas ( 64 ) spin_rw_lock<long long> instance_mutex;
+    spin_rw_lock<long long> instance_mutex;
 
     private:
     end_node_type end_node;
@@ -739,33 +739,23 @@ class unbounded_circular_list final {
         nodes.erase ( nodes.get_iterator_from_pointer ( node_ ) );
     }
 
-    [[nodiscard]] HEDLEY_ALWAYS_INLINE pointer_type get_pointer_exchange ( ) const noexcept {
-        return end_node.pointer_exchange.load ( std::memory_order_relaxed );
-    }
-    [[maybe_unused]] HEDLEY_ALWAYS_INLINE counter_type load_pointer_exchange ( pointer_type & p_ ) const noexcept {
-        p_ = end_node.pointer_exchange.load ( std::memory_order_relaxed );
-        return p_.get_counter ( );
-    }
-    HEDLEY_ALWAYS_INLINE pointer_type store_pointer_exchange ( pointer_type p_, counter_type value_ = 0 ) noexcept {
-        if ( value_ )
-            p_.set_counter ( value_ );
-        end_node.pointer_exchange.store ( p_, std::memory_order_relaxed );
-        return std::forward<pointer_type> ( p_ );
-    }
-
     void delete_node_implementation ( node_type_ptr old_node_ ) noexcept {
-        pointer_type volatile old_pointer = store_pointer_exchange ( old_node_ );
+        pointer_type volatile old_pointer = end_node.pointer_exchange.store ( old_node_, std::memory_order_relaxed );
         for ( ever ) {
             // increase external count
             pointer_type new_pointer;
             do {
                 new_pointer = old_pointer;
-                new_pointer.fetch_and_add ( 1 );
-            } while ( not compare_and_swap_m128 ( &old_pointer, get_pointer_exchange ( ), &new_pointer ) );
+                new_pointer.fetch_add ( 1 );
+            } while ( not compare_and_swap_m128 ( &old_pointer, end_node.pointer_exchange.load ( std::memory_order_relaxed ),
+                                                  &new_pointer ) );
             old_pointer = new_pointer;
             // we're poppin', go get the box
-            if ( not compare_and_swap_m128 ( &old_pointer, get_pointer_exchange ( ), &old_node_->link.next ) ) {
-                counter_type count_increase = old_pointer.fetch_and_add ( -2 );
+            head.compare_exchange_strong ( old_head, ptr->next, std::memory_order_relaxed )
+
+                if ( not compare_and_swap_m128 ( &old_pointer, end_node.pointer_exchange.load ( std::memory_order_relaxed ),
+                                                 &old_node_->link.next ) ) {
+                counter_type count_increase = old_pointer.fetch_add ( -2 );
                 if ( old_node_->internal_count.fetch_add ( count_increase, std::memory_order_release ) == -count_increase )
                     ordered_delete_implementation<false> ( std::forward<node_type_ptr> ( old_node_ ) );
                 return;
