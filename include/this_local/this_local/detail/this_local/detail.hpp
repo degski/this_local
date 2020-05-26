@@ -593,6 +593,7 @@ class alignas ( 64 ) unbounded_circular_list final {
     // class variables
 
     spin_rw_lock<long long> instance_mutex;
+    std::atomic<long long> id = 0;
 
     private:
     end_node_type end_node;
