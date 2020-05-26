@@ -518,10 +518,11 @@ class alignas ( 64 ) unbounded_circular_list final {
     struct link_type {
         alignas ( 16 ) link_type * prev = nullptr, *next = nullptr;
 
-        [[maybe_unused]] counter_type fetch_add ( int incr_ ) noexcept {
-            return std::exchange ( fetch ( ), char ( fetch ( ) + incr_ ) );
+        [[maybe_unused]] counter_type get_add ( counter_type increment_ ) noexcept {
+            return std::exchange ( get ( ), char ( get ( ) + increment_ ) );
         }
-        [[maybe_unused]] counter_type & fetch ( ) noexcept {
+        void set ( counter_type value_ ) noexcept { return std::exchange ( get ( ), std::forward<counter_type> ( value_ ) ); }
+        [[nodiscard]] counter_type & get ( ) noexcept {
             return *( reinterpret_cast<counter_type *> ( &prev ) + hi_index<void *> ( ) );
         }
 
@@ -542,10 +543,11 @@ class alignas ( 64 ) unbounded_circular_list final {
     struct pointer_type {
         link_type * value = nullptr;
 
-        [[maybe_unused]] counter_type fetch_add ( int incr_ ) noexcept {
-            return std::exchange ( fetch ( ), char ( fetch ( ) + incr_ ) );
+        [[maybe_unused]] counter_type get_add ( counter_type increment_ ) noexcept {
+            return std::exchange ( get ( ), char ( get ( ) + increment_ ) );
         }
-        [[maybe_unused]] counter_type fetch ( ) const noexcept {
+        void set ( counter_type value_ ) noexcept { return std::exchange ( get ( ), std::forward<counter_type> ( value_ ) ); }
+        [[nodiscard]] counter_type & get ( ) noexcept {
             return *( reinterpret_cast<counter_type *> ( &value ) + hi_index<void *> ( ) );
         }
 
@@ -630,11 +632,11 @@ class alignas ( 64 ) unbounded_circular_list final {
     }
     [[maybe_unused]] HEDLEY_ALWAYS_INLINE counter_type load_link_exchange ( link_type & l_ ) const noexcept {
         l_ = end_node.link_exchange.load ( std::memory_order_relaxed );
-        return l_.get_counter ( );
+        return l_.get ( );
     }
     [[maybe_unused]] HEDLEY_ALWAYS_INLINE link_type store_link_exchange ( link_type l_, counter_type value_ = 0 ) noexcept {
         if ( value_ )
-            l_.set_counter ( value_ );
+            l_.set ( value_ );
         end_node.link_exchange.store ( l_, std::memory_order_relaxed );
         return std::forward<link_type> ( l_ );
     }
