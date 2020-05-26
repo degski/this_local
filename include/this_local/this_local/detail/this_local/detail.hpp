@@ -518,7 +518,7 @@ class alignas ( 64 ) unbounded_circular_list final {
     struct link_type {
         alignas ( 16 ) link_type * prev = nullptr, *next = nullptr;
 
-        [[maybe_unused]] counter_type fetch_add ( int incr_ = 1 ) noexcept {
+        [[maybe_unused]] counter_type fetch_add ( int incr_ ) noexcept {
             return std::exchange ( fetch ( ), char ( fetch ( ) + incr_ ) );
         }
         [[maybe_unused]] counter_type & fetch ( ) noexcept {
@@ -542,7 +542,7 @@ class alignas ( 64 ) unbounded_circular_list final {
     struct pointer_type {
         link_type * value = nullptr;
 
-        [[maybe_unused]] counter_type fetch_add ( int incr_ = 1 ) noexcept {
+        [[maybe_unused]] counter_type fetch_add ( int incr_ ) noexcept {
             return std::exchange ( fetch ( ), char ( fetch ( ) + incr_ ) );
         }
         [[maybe_unused]] counter_type fetch ( ) const noexcept {
