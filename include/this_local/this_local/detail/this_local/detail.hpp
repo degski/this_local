@@ -407,9 +407,9 @@ HEDLEY_ALWAYS_INLINE void yield ( ) noexcept {
 #endif
 }
 
-// Never NULL ttas rw spin-lock.
+// A never-null test-test-and-set read-write spinlock.
 template<typename FlagType = int>
-struct spin_rw_lock final { // test-test-and-set
+struct spin_rw_lock final {
 
     spin_rw_lock ( ) noexcept                 = default;
     spin_rw_lock ( spin_rw_lock const & )     = delete;
@@ -419,11 +419,11 @@ struct spin_rw_lock final { // test-test-and-set
     spin_rw_lock & operator= ( spin_rw_lock const & ) = delete;
     spin_rw_lock & operator= ( spin_rw_lock && ) noexcept = delete;
 
-    static constexpr int uninitialized               = 0;
-    static constexpr int unlocked                    = 1;
-    static constexpr int locked_reader               = 2;
-    static constexpr int unlocked_locked_reader_mask = 3;
-    static constexpr int locked_writer               = 4;
+    static constexpr FlagType uninitialized               = 0;
+    static constexpr FlagType unlocked                    = 1;
+    static constexpr FlagType locked_reader               = 2;
+    static constexpr FlagType unlocked_locked_reader_mask = 3;
+    static constexpr FlagType locked_writer               = 4;
 
     HEDLEY_ALWAYS_INLINE void lock ( ) noexcept {
         do {
@@ -432,7 +432,7 @@ struct spin_rw_lock final { // test-test-and-set
         } while ( not try_lock ( ) );
     }
     [[nodiscard]] HEDLEY_ALWAYS_INLINE bool try_lock ( ) noexcept {
-        return unlocked == flag.link_exchange ( locked_writer, std::memory_order_acquire );
+        return unlocked == flag.exchange ( locked_writer, std::memory_order_acquire );
     }
     HEDLEY_ALWAYS_INLINE void unlock ( ) noexcept { flag.store ( unlocked, std::memory_order_release ); }
 
@@ -444,14 +444,14 @@ struct spin_rw_lock final { // test-test-and-set
     }
     [[nodiscard]] HEDLEY_ALWAYS_INLINE bool try_lock ( ) const noexcept {
         return unlocked_locked_reader_mask &
-               const_cast<std::atomic<int> *> ( &flag )->link_exchange ( locked_reader, std::memory_order_acquire );
+               const_cast<std::atomic<FlagType> *> ( &flag )->exchange ( locked_reader, std::memory_order_acquire );
     }
     HEDLEY_ALWAYS_INLINE void unlock ( ) const noexcept {
         const_cast<std::atomic<FlagType> *> ( &flag )->store ( unlocked, std::memory_order_release );
     }
 
     private:
-    std::atomic<int> flag = { unlocked };
+    std::atomic<FlagType> flag = { unlocked };
 };
 
 // Win32 - Slim Reader Writer Lock wrapper.
@@ -488,6 +488,52 @@ struct slim_rw_lock final {
 #define ever                                                                                                                       \
     ;                                                                                                                              \
     ;
+
+template<typename T, template<typename> typename Allocator = std::allocator>
+class plf_node_allocator {
+
+    static plf::colony<T, Allocator<T>> nodes;
+
+    public:
+    using value_type                             = T;
+    using difference_type                        = typename std::pointer_traits<value_type *>::difference_type;
+    using size_type                              = std::make_unsigned_t<difference_type>;
+    using propagate_on_container_move_assignment = std::true_type;
+    using is_always_equal                        = std::true_type;
+
+    plf_node_allocator ( ) noexcept                            = default;
+    plf_node_allocator ( plf_node_allocator const & ) noexcept = default;
+    template<class U>
+    plf_node_allocator ( plf_node_allocator<U> const & ) noexcept { };
+
+    [[nodiscard]] value_type * allocate ( std::size_t n_ ) {
+        return static_cast<value_type *> ( operator new ( n_ * sizeof ( value_type ) ) );
+    }
+
+    void deallocate ( value_type * ptr_, std::size_t ) noexcept { operator delete ( ptr_ ); }
+
+    private:
+    [[nodiscard]] void * operator new ( std::size_t ) {
+        auto ptr = &*nodes.emplace_back ( );
+        assert ( pointer_alignment ( ptr ) >= alignof ( value_type ) );
+        if ( ptr )
+            return ptr;
+        else
+            throw std::bad_alloc{ };
+    }
+
+    void operator delete ( void * ptr_ ) noexcept { nodes.erase ( nodes.get_iterator_from_pointer ( ptr_ ) ); }
+};
+
+template<class T, class U>
+[[nodiscard]] bool operator== ( plf_node_allocator<T> const &, plf_node_allocator<U> const & ) noexcept {
+    return true;
+}
+
+template<class T, class U>
+[[nodiscard]] bool operator!= ( plf_node_allocator<T> const &, plf_node_allocator<U> const & ) noexcept {
+    return false;
+}
 
 alignas ( 64 ) inline static lockless::spin_rw_lock<long long> ostream_mutex;
 
@@ -695,7 +741,8 @@ class alignas ( 64 ) unbounded_circular_list final {
     [[maybe_unused]] HEDLEY_NEVER_INLINE storage_iterator insert_initial_implementation ( node_type_ptr,
                                                                                           storage_iterator && it_ ) noexcept {
         std::scoped_lock lock ( instance_mutex );
-        if ( not thread_count++ ) {
+        if ( not thread_count.load ( std::memory_order_relaxed ) ) {
+            thread_count++;
             node_type_ptr new_node = &*it_;
             make_links<Order> ( &end_node.link, new_node, 0 );
             insert_before_implementation = &unbounded_circular_list::insert_regular_implementation<insert_before>;
