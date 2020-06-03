@@ -855,13 +855,13 @@ class alignas ( 64 ) unbounded_circular_list final {
 
     private:
     static void repair_after_links ( node_type_ptr node_ ) noexcept {
-        if ( HEDLEY_LIKELY ( node_ ) ) {
+        // if ( HEDLEY_LIKELY ( node_ ) ) {
             counted_link * node = ( counted_link * ) node_->next_;
             while ( HEDLEY_LIKELY ( node != ( ( counted_link * ) node_ ) ) ) {
                 node->prev = ( counted_link * ) node;
                 node       = node->next;
             }
-        }
+        // }
     }
 
     public:
