@@ -490,7 +490,7 @@ struct slim_rw_lock final {
     ;
 
 template<typename T, template<typename> typename Allocator = std::allocator>
-class plf_node_allocator {
+class plf_proxy_node_allocator {
 
     static plf::colony<T, Allocator<T>> nodes;
 
@@ -501,10 +501,10 @@ class plf_node_allocator {
     using propagate_on_container_move_assignment = std::true_type;
     using is_always_equal                        = std::true_type;
 
-    plf_node_allocator ( ) noexcept                            = default;
-    plf_node_allocator ( plf_node_allocator const & ) noexcept = default;
+    plf_proxy_node_allocator ( ) noexcept                            = default;
+    plf_proxy_node_allocator ( plf_proxy_node_allocator const & ) noexcept = default;
     template<class U>
-    plf_node_allocator ( plf_node_allocator<U> const & ) noexcept { };
+    plf_proxy_node_allocator ( plf_proxy_node_allocator<U> const & ) noexcept { };
 
     [[nodiscard]] value_type * allocate ( std::size_t n_ ) {
         return static_cast<value_type *> ( operator new ( n_ * sizeof ( value_type ) ) );
@@ -526,12 +526,12 @@ class plf_node_allocator {
 };
 
 template<class T, class U>
-[[nodiscard]] bool operator== ( plf_node_allocator<T> const &, plf_node_allocator<U> const & ) noexcept {
+[[nodiscard]] bool operator== ( plf_proxy_node_allocator<T> const &, plf_proxy_node_allocator<U> const & ) noexcept {
     return true;
 }
 
 template<class T, class U>
-[[nodiscard]] bool operator!= ( plf_node_allocator<T> const &, plf_node_allocator<U> const & ) noexcept {
+[[nodiscard]] bool operator!= ( plf_proxy_node_allocator<T> const &, plf_proxy_node_allocator<U> const & ) noexcept {
     return false;
 }
 
