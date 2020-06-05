@@ -163,13 +163,23 @@ HEDLEY_ALWAYS_INLINE void clobber_memory ( ) noexcept {
 } // namespace lockless
 
 template<typename ValueType>
-inline constexpr int hi_index ( ) noexcept {
-    short v = 1;
-    return *reinterpret_cast<char *> ( &v ) ? sizeof ( ValueType ) - 1 : 0;
+constexpr int hi_byte_index ( ) noexcept {
+    short s = 1;
+    return char ( s ) * ( sizeof ( ValueType ) - 1 );
 }
 
+inline constexpr bool is_little_endian = hi_byte_index<short> ( );
+
 template<typename ValueType>
-inline constexpr int lo_index ( ) noexcept {
+constexpr int lo_byte_index ( ) noexcept {
+    short s = 1;
+    return not char ( s ) * ( sizeof ( ValueType ) - 1 );
+}
+
+inline constexpr bool is_big_endian = lo_byte_index<short> ( );
+
+template<typename ValueType>
+inline constexpr int lo_byte_index ( ) noexcept {
     short v = 1;
     return not *reinterpret_cast<char *> ( &v ) ? sizeof ( ValueType ) - 1 : 0;
 }
@@ -380,14 +390,14 @@ template<typename MutexType>
     bool value;
     __asm__ __volatile__( "lock cmpxchg16b %1\n\t"
                           "setz %0"
-                          : "=q"( value ), "+m"( dest_ ), "+d"( cr_old_->m128_m64[ hi_index<short> ( ) ] ),
-                            "+a"( cr_old_->m128_m64[ lo_index<short> ( ) ] )
-                          : "c"( ex_new_.m128_m64[ hi_index<short> ( ) ] ), "b"( ex_new_.m128_m64[ lo_index<short> ( ) ] )
+                          : "=q"( value ), "+m"( dest_ ), "+d"( cr_old_->m128_m64[ hi_byte_index<short> ( ) ] ),
+                            "+a"( cr_old_->m128_m64[ lo_byte_index<short> ( ) ] )
+                          : "c"( ex_new_.m128_m64[ hi_byte_index<short> ( ) ] ), "b"( ex_new_.m128_m64[ lo_byte_index<short> ( ) ] )
                           : "cc" );
     return value;
 #else
-    return _InterlockedCompareExchange128 ( ( long long volatile * ) dest_, ex_new_.m128_long64[ hi_index<short> ( ) ],
-                                            ex_new_.m128_long64[ lo_index<short> ( ) ], ( long long * ) cr_old_ );
+    return _InterlockedCompareExchange128 ( ( long long volatile * ) dest_, ex_new_.m128_long64[ hi_byte_index<short> ( ) ],
+                                            ex_new_.m128_long64[ lo_byte_index<short> ( ) ], ( long long * ) cr_old_ );
 #endif
 }
 
@@ -501,7 +511,7 @@ class plf_proxy_node_allocator {
     using propagate_on_container_move_assignment = std::true_type;
     using is_always_equal                        = std::true_type;
 
-    plf_proxy_node_allocator ( ) noexcept                            = default;
+    plf_proxy_node_allocator ( ) noexcept                                  = default;
     plf_proxy_node_allocator ( plf_proxy_node_allocator const & ) noexcept = default;
     template<class U>
     plf_proxy_node_allocator ( plf_proxy_node_allocator<U> const & ) noexcept { };
@@ -569,7 +579,7 @@ class alignas ( 64 ) unbounded_circular_list final {
         }
         void set ( counter_type value_ ) noexcept { return std::exchange ( get ( ), std::forward<counter_type> ( value_ ) ); }
         [[nodiscard]] counter_type & get ( ) noexcept {
-            return *( reinterpret_cast<counter_type *> ( &prev ) + hi_index<void *> ( ) );
+            return *( reinterpret_cast<counter_type *> ( &prev ) + hi_byte_index<void *> ( ) );
         }
 
         [[nodiscard]] bool operator== ( link_type const & r_ ) const noexcept { return is_equal_m128 ( this, &r_ ); }
@@ -594,7 +604,7 @@ class alignas ( 64 ) unbounded_circular_list final {
         }
         void set ( counter_type value_ ) noexcept { return std::exchange ( get ( ), std::forward<counter_type> ( value_ ) ); }
         [[nodiscard]] counter_type & get ( ) noexcept {
-            return *( reinterpret_cast<counter_type *> ( &value ) + hi_index<void *> ( ) );
+            return *( reinterpret_cast<counter_type *> ( &value ) + hi_byte_index<void *> ( ) );
         }
 
         [[nodiscard]] bool operator== ( pointer_type const & r_ ) const noexcept { return is_equal_m128 ( this, &r_ ); }
@@ -856,11 +866,11 @@ class alignas ( 64 ) unbounded_circular_list final {
     private:
     static void repair_after_links ( node_type_ptr node_ ) noexcept {
         // if ( HEDLEY_LIKELY ( node_ ) ) {
-            counted_link * node = ( counted_link * ) node_->next_;
-            while ( HEDLEY_LIKELY ( node != ( ( counted_link * ) node_ ) ) ) {
-                node->prev = ( counted_link * ) node;
-                node       = node->next;
-            }
+        counted_link * node = ( counted_link * ) node_->next_;
+        while ( HEDLEY_LIKELY ( node != ( ( counted_link * ) node_ ) ) ) {
+            node->prev = ( counted_link * ) node;
+            node       = node->next;
+        }
         // }
     }
 
